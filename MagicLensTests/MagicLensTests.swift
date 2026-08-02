@@ -1,14 +1,14 @@
 //
-//  EgoBoothTests.swift
-//  EgoBoothTests
+//  MagicLensTests.swift
+//  MagicLensTests
 //
 //  Created by Darkstar on 4/30/21.
 //
 
 import XCTest
-@testable import EgoBooth
+@testable import MagicLens
 
-class EgoBoothTests: XCTestCase {
+class MagicLensTests: XCTestCase {
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.

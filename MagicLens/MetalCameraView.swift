@@ -1,0 +1,32 @@
+//
+//  MetalCameraView.swift
+//  MagicLens
+//
+
+import MetalKit
+import SwiftUI
+
+/// SwiftUI has no native Metal view, so the MTKView is bridged. The renderer
+/// doubles as the representable's coordinator, which gives it exactly the
+/// lifetime SwiftUI expects to manage.
+struct MetalCameraView: UIViewRepresentable {
+
+    let controller: CameraController
+
+    func makeCoordinator() -> Renderer {
+        Renderer(controller: controller)
+    }
+
+    func makeUIView(context: Context) -> MTKView {
+        let view = MTKView(frame: .zero, device: controller.device)
+        view.delegate = context.coordinator
+        view.colorPixelFormat = Renderer.colorPixelFormat
+        view.clearColor = Renderer.clearColor
+        view.isOpaque = true
+        return view
+    }
+
+    func updateUIView(_ view: MTKView, context: Context) {
+        context.coordinator.setEffect(controller.effect)
+    }
+}
