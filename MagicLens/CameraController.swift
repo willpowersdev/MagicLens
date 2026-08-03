@@ -22,6 +22,10 @@ final class CameraController {
 
     let device: MTLDevice
     let feed: CameraFeed
+    let recorder = VideoRecorder()
+    let library = VideoLibrary()
+
+    private(set) var isRecording = false
 
     /// A `let` holding a reference type, so the macro leaves it alone.
     let touch = TouchState()
@@ -53,5 +57,25 @@ final class CameraController {
 
     func flipCamera() {
         feed.rotateCamera()
+    }
+
+    /// Starts recording, or stops and files the result in the library.
+    ///
+    /// Starting only raises a flag — the writer itself is created by the
+    /// renderer on its next frame, which is where the drawable size is known.
+    func toggleRecording() {
+        if isRecording {
+            isRecording = false
+            recorder.isRequested = false
+            recorder.finish { [library] finished in
+                guard let finished else {
+                    return
+                }
+                library.adopt(finished)
+            }
+        } else {
+            recorder.isRequested = true
+            isRecording = true
+        }
     }
 }

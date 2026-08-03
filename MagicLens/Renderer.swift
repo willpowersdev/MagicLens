@@ -55,6 +55,11 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     private let feed: CameraFeed
     private let touch: TouchState
+    private let recorder: VideoRecorder
+
+    /// Wraps the recorder's pixel buffers as Metal textures to blit into. Kept
+    /// separate from the camera's cache, which holds incoming frames.
+    private var recordingTextureCache: CVMetalTextureCache?
 
     private var effectPipelineState: MTLRenderPipelineState?
     private var currentEffect: Effect?
@@ -69,6 +74,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.device = controller.device
         self.feed = controller.feed
         self.touch = controller.touch
+        self.recorder = controller.recorder
 
         guard let commandQueue = device.makeCommandQueue(),
               let library = device.makeDefaultLibrary() else {
@@ -99,6 +105,42 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.gradientPipelineState = gradientPipelineState
 
         super.init()
+
+        CVMetalTextureCacheCreate(kCFAllocatorDefault,
+                                  nil,
+                                  device,
+                                  nil,
+                                  &recordingTextureCache)
+    }
+
+    /// Wraps one of the recorder's pixel buffers so the GPU can blit into it.
+    /// The CVMetalTexture is returned alongside because it has to outlive the
+    /// blit — releasing it early would pull the texture out from under the GPU.
+    private func recordingTarget(for buffer: CVPixelBuffer) -> (MTLTexture, CVMetalTexture)? {
+
+        guard let cache = recordingTextureCache else {
+            return nil
+        }
+
+        var wrapper: CVMetalTexture?
+        let status = CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault,
+            cache,
+            buffer,
+            nil,
+            .bgra8Unorm,
+            CVPixelBufferGetWidth(buffer),
+            CVPixelBufferGetHeight(buffer),
+            0,
+            &wrapper)
+
+        guard status == kCVReturnSuccess,
+              let wrapper,
+              let texture = CVMetalTextureGetTexture(wrapper) else {
+            return nil
+        }
+
+        return (texture, wrapper)
     }
 
     private static func makePipelineState(device: MTLDevice,
@@ -192,7 +234,56 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         encoder.endEncoding()
 
+        capture(from: drawable.texture, into: commandBuffer, size: view.drawableSize)
+
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+
+    /// Copies the frame just drawn into a recorder pixel buffer.
+    ///
+    /// Blitting out of the drawable rather than rendering the scene a second
+    /// time means recording costs one copy, not another pass over the effect —
+    /// which matters when a shader samples the video a hundred times per pixel.
+    /// It relies on the view's framebufferOnly being off, or the drawable
+    /// couldn't be read.
+    private func capture(from source: MTLTexture,
+                         into commandBuffer: MTLCommandBuffer,
+                         size: CGSize) {
+
+        guard recorder.isRequested else {
+            return
+        }
+
+        recorder.beginIfNeeded(size: size)
+
+        guard let buffer = recorder.nextPixelBuffer(),
+              let (destination, wrapper) = recordingTarget(for: buffer),
+              let blit = commandBuffer.makeBlitCommandEncoder() else {
+            return
+        }
+
+        // The recorder rounds down to even dimensions, so the drawable can be a
+        // pixel wider or taller. Copy the region they share.
+        let width = min(source.width, destination.width)
+        let height = min(source.height, destination.height)
+
+        blit.copy(from: source,
+                  sourceSlice: 0,
+                  sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: width, height: height, depth: 1),
+                  to: destination,
+                  destinationSlice: 0,
+                  destinationLevel: 0,
+                  destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        blit.endEncoding()
+
+        // Appended once the GPU has actually filled the buffer. `wrapper` is
+        // captured purely to keep the texture alive until then.
+        commandBuffer.addCompletedHandler { [recorder] _ in
+            _ = wrapper
+            recorder.append(buffer)
+        }
     }
 }

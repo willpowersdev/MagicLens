@@ -56,6 +56,11 @@ struct MetalCameraView: UIViewRepresentable {
         view.colorPixelFormat = Renderer.colorPixelFormat
         view.clearColor = Renderer.clearColor
         view.isOpaque = true
+
+        // Recording blits out of the drawable, which a framebufferOnly texture
+        // can't be read from.
+        view.framebufferOnly = false
+
         return view
     }
 

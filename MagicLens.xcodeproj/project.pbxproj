@@ -46,6 +46,9 @@
 		EB000200000000000000000A /* MetalCameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0002000000000000000009 /* MetalCameraView.swift */; };
 		EB000200000000000000000C /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB000200000000000000000B /* CameraView.swift */; };
 		EB000200000000000000000E /* FilterPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB000200000000000000000D /* FilterPicker.swift */; };
+		EB0003000000000000000002 /* VideoRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000001 /* VideoRecorder.swift */; };
+		EB0003000000000000000004 /* VideoLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000003 /* VideoLibrary.swift */; };
+		EB0003000000000000000006 /* RecordingsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000005 /* RecordingsGrid.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,6 +115,9 @@
 		EB0002000000000000000009 /* MetalCameraView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalCameraView.swift; sourceTree = "<group>"; };
 		EB000200000000000000000B /* CameraView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		EB000200000000000000000D /* FilterPicker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FilterPicker.swift; sourceTree = "<group>"; };
+		EB0003000000000000000001 /* VideoRecorder.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoRecorder.swift; sourceTree = "<group>"; };
+		EB0003000000000000000003 /* VideoLibrary.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoLibrary.swift; sourceTree = "<group>"; };
+		EB0003000000000000000005 /* RecordingsGrid.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordingsGrid.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -169,6 +175,9 @@
 				EB0002000000000000000009 /* MetalCameraView.swift */,
 				EB000200000000000000000B /* CameraView.swift */,
 				EB000200000000000000000D /* FilterPicker.swift */,
+				EB0003000000000000000001 /* VideoRecorder.swift */,
+				EB0003000000000000000003 /* VideoLibrary.swift */,
+				EB0003000000000000000005 /* RecordingsGrid.swift */,
 				CDCB7706263C012700709455 /* CameraFeed.swift */,
 				CDCB76D5263C00D400709455 /* Info.plist */,
 				CDCB7716263C01B900709455 /* Assets.xcassets */,
@@ -402,6 +411,9 @@
 				EB000200000000000000000A /* MetalCameraView.swift in Sources */,
 				EB000200000000000000000C /* CameraView.swift in Sources */,
 				EB000200000000000000000E /* FilterPicker.swift in Sources */,
+				EB0003000000000000000002 /* VideoRecorder.swift in Sources */,
+				EB0003000000000000000004 /* VideoLibrary.swift in Sources */,
+				EB0003000000000000000006 /* RecordingsGrid.swift in Sources */,
 				CDCB7715263C012700709455 /* CameraFeed.swift in Sources */,
 				CDCB771D263D0ADF00709455 /* Array+Helpers.swift in Sources */,
 			);
