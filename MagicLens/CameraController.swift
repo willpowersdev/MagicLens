@@ -27,6 +27,9 @@ final class CameraController {
 
     private(set) var isRecording = false
 
+    /// When the current take started, for the on screen timer.
+    private(set) var recordingStarted: Date?
+
     /// A `let` holding a reference type, so the macro leaves it alone.
     let touch = TouchState()
 
@@ -72,6 +75,7 @@ final class CameraController {
     func toggleRecording() {
         if isRecording {
             isRecording = false
+            recordingStarted = nil
             recorder.isRequested = false
             recorder.finish { [library] finished in
                 guard let finished else {
@@ -82,6 +86,7 @@ final class CameraController {
         } else {
             recorder.isRequested = true
             isRecording = true
+            recordingStarted = Date()
         }
     }
 }

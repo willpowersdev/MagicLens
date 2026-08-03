@@ -25,9 +25,13 @@ struct CameraView: View {
             controls
 
             VStack {
-                HStack {
-                    Spacer()
-                    libraryButton
+                ZStack {
+                    recordingBadge
+
+                    HStack {
+                        Spacer()
+                        libraryButton
+                    }
                 }
                 Spacer()
             }
@@ -137,6 +141,32 @@ struct CameraView: View {
             }
         }
         .accessibilityLabel(controller.isRecording ? "Stop recording" : "Start recording")
+    }
+
+    /// Unambiguous feedback that a take is running, and that stopping ended it.
+    /// The system's own green indicator can't serve here: it means the camera is
+    /// in use, which is true the whole time the preview is on screen.
+    @ViewBuilder
+    private var recordingBadge: some View {
+        if controller.isRecording, let started = controller.recordingStarted {
+            TimelineView(.periodic(from: started, by: 0.5)) { context in
+                let elapsed = Int(context.date.timeIntervalSince(started))
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 8, height: 8)
+
+                    Text(String(format: "%d:%02d", elapsed / 60, elapsed % 60))
+                        .font(.footnote.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.6), in: .capsule)
+            }
+            .transition(.opacity)
+        }
     }
 
     /// Opens the library. Hidden while recording, so the grid can't be opened
