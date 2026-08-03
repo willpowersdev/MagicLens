@@ -26,7 +26,7 @@ final class CameraController {
     /// A `let` holding a reference type, so the macro leaves it alone.
     let touch = TouchState()
 
-    var effect: Effect = .fisheye
+    var effect: Effect = .crt
 
     init() {
         // Every device this app supports has Metal; there is no meaningful
