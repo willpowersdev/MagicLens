@@ -72,16 +72,8 @@ struct MetalCameraView: UIViewRepresentable {
         // run loop has nothing to drive the Core Animation commit, so a state
         // change can sit unrendered until something unrelated happens to wake
         // it. Rendering a hidden frame is far cheaper than that stall.
-
-        // autoResizeDrawable sizes the drawable from bounds × contentScaleFactor,
-        // so capping the scale here is what keeps the fragment cost down. The
-        // layer scales the smaller drawable back up to fill the screen.
-        let displayScale = view.traitCollection.displayScale
-        if displayScale > 0 {
-            let capped = min(displayScale, Renderer.maximumDrawableScale)
-            if view.contentScaleFactor != capped {
-                view.contentScaleFactor = capped
-            }
-        }
+        //
+        // The drawable is left at the display's own scale. Rendering and
+        // recording therefore happen at full native resolution.
     }
 }

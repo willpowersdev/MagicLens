@@ -26,13 +26,6 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     static let colorPixelFormat: MTLPixelFormat = .bgra8Unorm
 
-    /// Ceiling on the drawable's scale factor.
-    ///
-    /// The effects are fragment bound, and on a 3x phone a full res drawable is
-    /// around 3 million pixels — RadialBlur alone samples the video 101 times
-    /// per pixel. The camera itself only supplies 1080p, so rendering above 2x
-    /// costs a great deal and shows almost nothing for it.
-    static let maximumDrawableScale: CGFloat = 2.0
 
     /// Matches the top of the gradient, so a dropped frame is invisible.
     static let clearColor = MTLClearColor(red: 0.118, green: 0.227, blue: 0.541, alpha: 1.0)
