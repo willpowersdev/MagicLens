@@ -28,6 +28,14 @@ struct MetalCameraView: UIViewRepresentable {
         view.colorPixelFormat = Renderer.colorPixelFormat
         view.clearColor = Renderer.clearColor
         view.isOpaque = true
+
+        // The camera view takes no part in touch handling — no gesture, and no
+        // touchesBegan/Moved overrides. Every form of touch handling tried here
+        // brought back a roughly one second stall before the effect picker would
+        // appear, and removing it is the only thing that ever cleared it. The
+        // shaders read a fixed centre touch point as a result.
+        view.isUserInteractionEnabled = false
+
         return view
     }
 

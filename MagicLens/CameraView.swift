@@ -12,42 +12,33 @@ struct CameraView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    /// How far a finger must travel before it counts as tracking rather than a
-    /// tap. Anything above zero is enough to keep taps out of the recogniser;
-    /// this is roughly UIKit's own slop.
-    private static let dragActivationDistance: CGFloat = 10
-
     var body: some View {
         ZStack(alignment: .bottom) {
-            GeometryReader { proxy in
-                MetalCameraView(controller: controller, isPaused: isShowingPicker)
-                    // Only engages once a finger has actually travelled. The
-                    // original used minimumDistance 0, which claimed every touch
-                    // the instant it landed — including taps on the buttons —
-                    // and that held iOS's system gesture gate, which then sat on
-                    // the picker's presentation for a full second before timing
-                    // out. Requiring real movement means a tap never starts a
-                    // continuous recogniser, and the sheet opens immediately.
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: Self.dragActivationDistance)
-                            .onChanged { value in
-                                controller.touch.normalized = SIMD2(
-                                    Float(value.location.x / proxy.size.width),
-                                    Float(value.location.y / proxy.size.height))
-                            }
-                    )
-            }
-            .ignoresSafeArea()
+            // No gesture here: touch tracking lives in the MTKView itself.
+            // See TouchTrackingMTKView.
+            MetalCameraView(controller: controller, isPaused: isShowingPicker)
+                .ignoresSafeArea()
 
-            // Inside the safe area, deliberately. As an .overlay applied after
-            // .ignoresSafeArea() these aligned to the physical screen bottom,
-            // which put them in the home indicator's region — and tapping there
-            // made the system gesture gate hold the sheet presentation until it
-            // timed out, about a second later.
+            // Inside the safe area, deliberately — at the physical screen bottom
+            // these sat in the home indicator's region.
             controls
-        }
-        .sheet(isPresented: $isShowingPicker) {
-            FilterPicker(selection: $controller.effect)
+
+            // Presented inside this hierarchy rather than with .sheet.
+            //
+            // Timing the sheet showed SwiftUI had the picker built in under
+            // 130 ms while UIKit took another second to actually present it,
+            // with the main thread idle throughout. Nothing in our code was on
+            // that path, so the fix is to stay off it: an overlay animates
+            // through SwiftUI alone and appears immediately.
+            if isShowingPicker {
+                FilterPicker(selection: $controller.effect) {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        isShowingPicker = false
+                    }
+                }
+                .transition(.move(edge: .bottom))
+                .zIndex(1)
+            }
         }
         .onAppear {
             controller.start()
@@ -69,7 +60,9 @@ struct CameraView: View {
     private var controls: some View {
         HStack {
             Button {
-                isShowingPicker = true
+                withAnimation(.easeOut(duration: 0.25)) {
+                    isShowingPicker = true
+                }
             } label: {
                 // Drawn rather than an image, so it stays crisp at any scale and
                 // matches the fill of the camera button beside it.
