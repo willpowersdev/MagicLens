@@ -21,27 +21,41 @@ struct FilterPicker: View {
 
             Divider()
 
-            List(Effect.all) { effect in
-                Button {
-                    selection = effect
-                    dismiss()
-                } label: {
-                    HStack {
-                        Text(effect.title)
-                        Spacer()
-                        if effect == selection {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.tint)
-                        }
+            // Deliberately a ScrollView of rows rather than a List. List is
+            // UICollectionView backed, and standing that machinery up the first
+            // time is far more work than eleven static rows justify — enough to
+            // be visible as a delay when the picker is opened.
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Effect.all) { effect in
+                        row(for: effect)
+                        Divider().padding(.leading, 20)
                     }
-                    .contentShape(.rect)
                 }
-                .foregroundStyle(.primary)
             }
-            .listStyle(.plain)
         }
-        .background(.background)
+        .background(Color(.systemBackground))
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private func row(for effect: Effect) -> some View {
+        Button {
+            selection = effect
+            dismiss()
+        } label: {
+            HStack {
+                Text(effect.title)
+                Spacer()
+                if effect == selection {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .contentShape(.rect)
+        }
+        .foregroundStyle(.primary)
     }
 
     private var header: some View {
