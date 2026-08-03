@@ -13,8 +13,11 @@ fragment float4 fragment_radialblur(VertexOut interpolated [[stage_in]],
 
     float2 fragCoord = bottomLeftFragCoord(interpolated.computedPosition, uniforms.resolution);
 
+    // Centred on the screen, so scaling p walks the samples toward the middle.
+    // The original followed this with `p = vec3(-p.y, -p.x, p.z)` — a transpose
+    // about the centre that stood the sensor's landscape frame upright, the same
+    // job the other effects did with `1.0 - uv.yx`. sampleVideo handles it now.
     float3 p = float3(fragCoord / uniforms.resolution, interpolated.computedPosition.z) - 0.5;
-    p = float3(-p.y, -p.x, p.z);
 
     // The original folded `p.xy *= 0.992` into the sampling expression; spelled
     // out here because compound assignment to a swizzle isn't an expression in
