@@ -71,10 +71,11 @@ struct CameraView: View {
             Button {
                 isShowingPicker = true
             } label: {
-                Image("glitch_selector")
-                    .resizable()
+                // Drawn rather than an image, so it stays crisp at any scale and
+                // matches the fill of the camera button beside it.
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.black.opacity(0.8))
                     .frame(width: 64, height: 64)
-                    .clipShape(.rect(cornerRadius: 14, style: .continuous))
             }
             .accessibilityLabel("Choose effect")
 
