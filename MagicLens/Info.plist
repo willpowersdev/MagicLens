@@ -22,6 +22,11 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>This app requires use of the camera.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>
