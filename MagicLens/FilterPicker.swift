@@ -38,7 +38,6 @@ struct FilterPicker: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
     }
 }
 
