@@ -20,11 +20,11 @@ fragment float4 fragment_radialblur(VertexOut interpolated [[stage_in]],
     // out here because compound assignment to a swizzle isn't an expression in
     // Metal.
     p.xy *= 0.992;
-    float3 o = sampleVideo(video, 0.5 + p.xy).rbb;
+    float3 o = sampleVideo(video, 0.5 + p.xy, uniforms).rbb;
 
     for (int i = 0; i < 100; i++) {
         p.xy *= 0.992;
-        p.z += pow(max(0.0, 0.5 - length(sampleVideo(video, 0.5 + p.xy).rg)), 2.0) *
+        p.z += pow(max(0.0, 0.5 - length(sampleVideo(video, 0.5 + p.xy, uniforms).rg)), 2.0) *
                exp(-float(i) * 0.08);
     }
 

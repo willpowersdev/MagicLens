@@ -12,6 +12,11 @@ struct Uniforms {
     var cameraResolution: SIMD2<Float>
     var touchPoint: SIMD2<Float>
     var globalTime: Float
+    /// 1 when the frame arrived in the sensor's landscape orientation and needs
+    /// standing up; 0 when it already arrived portrait.
+    var videoRotated: Float
+    /// 1 for the selfie camera, which wants mirroring.
+    var videoMirrored: Float
 }
 
 /// Draws a full screen quad textured with the latest camera frame and run
@@ -147,13 +152,19 @@ final class Renderer: NSObject, MTKViewDelegate {
         if let videoTexture = feed.currentTexture, let pipelineState = effectPipelineState {
             encoder.setRenderPipelineState(pipelineState)
 
+            // Read off the frame itself rather than assumed, so this stays right
+            // if some device or format does hand back an already-rotated buffer.
+            let arrivedLandscape = videoTexture.width > videoTexture.height
+
             var uniforms = Uniforms(
                 resolution: SIMD2(Float(view.drawableSize.width),
                                   Float(view.drawableSize.height)),
                 cameraResolution: SIMD2(Float(videoTexture.width),
                                         Float(videoTexture.height)),
                 touchPoint: touch.normalized,
-                globalTime: Float(Date().timeIntervalSince(startDate)))
+                globalTime: Float(Date().timeIntervalSince(startDate)),
+                videoRotated: arrivedLandscape ? 1.0 : 0.0,
+                videoMirrored: feed.isFrontFacing ? 1.0 : 0.0)
 
             // Small enough to go inline rather than through an MTLBuffer.
             encoder.setFragmentBytes(&uniforms,

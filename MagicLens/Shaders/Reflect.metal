@@ -32,5 +32,5 @@ fragment float4 fragment_reflect(VertexOut interpolated [[stage_in]],
     // that expression was always exactly 1.0. Dropped rather than kept as a
     // no-op multiply.
 
-    return sampleVideo(video, uv);
+    return sampleVideo(video, uv, uniforms);
 }

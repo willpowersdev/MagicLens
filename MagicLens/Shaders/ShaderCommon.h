@@ -14,12 +14,17 @@
 #include <metal_stdlib>
 using namespace metal;
 
-/// Mirrors `Uniforms` in ViewController.swift. Keep the two in sync.
+/// Mirrors `Uniforms` in Renderer.swift. Keep the two in sync.
 struct Uniforms {
     float2 resolution;
     float2 cameraResolution;
     float2 touchPoint;
     float globalTime;
+    /// 1 when the frame arrived in the sensor's landscape orientation and needs
+    /// standing up; 0 when it already arrived portrait.
+    float videoRotated;
+    /// 1 for the selfie camera, which wants mirroring.
+    float videoMirrored;
 };
 
 struct VertexOut {
@@ -36,14 +41,40 @@ static inline float2 bottomLeftFragCoord(float4 position, float2 resolution) {
     return float2(position.x, resolution.y - position.y);
 }
 
-/// GL samples textures with (0,0) at the bottom left, Metal with (0,0) at the
-/// top left. Flipping here rather than in the vertex data means every ported
-/// shader's uv arithmetic stays exactly as it was written.
-static inline float4 sampleVideo(texture2d<float> video, float2 uv) {
+/// The single place camera orientation is decided.
+///
+/// `uv` arrives in the ported GLSL convention — origin bottom left — and every
+/// effect's own uv arithmetic stays in that screen space. The rotation and
+/// mirroring needed to turn the sensor's landscape frame into an upright
+/// selfie happen here, at sample time, so no effect has to know about it.
+///
+/// If the image still comes out wrong, this function is the only thing to
+/// change: swap the two branches of `rotated` for the opposite quarter turn,
+/// or drop the `mirrored` block to stop flipping the selfie camera.
+static inline float4 sampleVideo(texture2d<float> video,
+                                 float2 uv,
+                                 constant Uniforms &uniforms) {
+
     constexpr sampler videoSampler(coord::normalized,
                                    address::clamp_to_edge,
                                    filter::linear);
-    return video.sample(videoSampler, float2(uv.x, 1.0 - uv.y));
+
+    // GL samples with (0,0) at the bottom left, Metal at the top left.
+    float2 screen = float2(uv.x, 1.0 - uv.y);
+
+    // Mirror across the screen's vertical axis, so the selfie camera reads as
+    // a reflection.
+    if (uniforms.videoMirrored > 0.5) {
+        screen.x = 1.0 - screen.x;
+    }
+
+    // Stand the landscape frame up: a quarter turn clockwise. Destination
+    // (x, y) reads from source (y, 1 - x).
+    float2 texCoord = uniforms.videoRotated > 0.5
+        ? float2(screen.y, 1.0 - screen.x)
+        : screen;
+
+    return video.sample(videoSampler, texCoord);
 }
 
 /// GLSL's `mod` and Metal's `fmod` disagree on negative operands.

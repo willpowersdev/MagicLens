@@ -34,6 +34,18 @@ final class CameraFeed: NSObject {
     private var rgbaTexture: CVMetalTexture?
     private let textureLock = NSLock()
 
+    /// Also guarded by `textureLock`: set when the session is built, read by the
+    /// renderer to decide whether to mirror.
+    private var frontFacing = true
+    private var hasLoggedFormat = false
+
+    /// Whether the running session is the selfie camera, and so wants mirroring.
+    var isFrontFacing: Bool {
+        textureLock.lock()
+        defer { textureLock.unlock() }
+        return frontFacing
+    }
+
     /// The most recent camera frame, as a Metal texture ready for sampling.
     /// Safe to call from any thread.
     var currentTexture: MTLTexture? {
@@ -166,35 +178,21 @@ final class CameraFeed: NSObject {
 
             session.addOutput(output)
             session.sessionPreset = AVCaptureSession.Preset.high
-            configureConnection(for: output, device: device)
             session.commitConfiguration()
+
+            // Orientation is corrected at sample time in the shader rather than
+            // here. Asking the connection to rotate is silently ignored when the
+            // device or format doesn't support it, which leaves the frame
+            // sideways with nothing to show for it; sampling always applies.
+            textureLock.lock()
+            frontFacing = device.position == .front
+            hasLoggedFormat = false
+            textureLock.unlock()
+
             session.startRunning()
 
         } catch let error {
             assertionFailure("error: \(error.localizedDescription)")
-        }
-    }
-
-    /// The sensor hands back frames in its own landscape orientation, which is a
-    /// quarter turn away from how the app is held, and the front camera is not
-    /// mirrored by default. Correcting both here — rather than with per-shader uv
-    /// swizzles — means every effect can sample a plain, upright texture.
-    private func configureConnection(for output: AVCaptureVideoDataOutput,
-                                     device: AVCaptureDevice) {
-
-        guard let connection = output.connection(with: .video) else {
-            return
-        }
-
-        // 90° is portrait.
-        if connection.isVideoRotationAngleSupported(90) {
-            connection.videoRotationAngle = 90
-        }
-
-        // isVideoMirrored is only writable once the automatic adjustment is off.
-        if connection.isVideoMirroringSupported {
-            connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = device.position == .front
         }
     }
 }
@@ -241,6 +239,14 @@ extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate {
         // below recycle it.
         textureLock.lock()
         rgbaTexture = texture
+        if !hasLoggedFormat {
+            hasLoggedFormat = true
+            // Landscape here means the sensor's own orientation reached us
+            // unrotated, which is what the sampling correction assumes.
+            print("[MagicLens] camera buffer \(width)x\(height), "
+                  + "\(width > height ? "landscape" : "portrait"), "
+                  + "front: \(frontFacing)")
+        }
         textureLock.unlock()
 
         CVMetalTextureCacheFlush(textureCache, 0)

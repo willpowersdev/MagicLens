@@ -11,7 +11,8 @@ static float applyKernel(float3x3 gx,
                          float3x3 gy,
                          texture2d<float> video,
                          float2 uv,
-                         float2 cameraResolution) {
+                         float2 cameraResolution,
+                         constant Uniforms &uniforms) {
 
     float horizontal = 0.0;
     float vertical = 0.0;
@@ -19,7 +20,7 @@ static float applyKernel(float3x3 gx,
     for (int i = 0; i < 3; i++) {
         for (int j = 0; j < 3; j++) {
             float2 d = float2(float(i), float(j)) / cameraResolution;
-            float averagePixel = dot(sampleVideo(video, uv + d).rgb, float3(0.33333));
+            float averagePixel = dot(sampleVideo(video, uv + d, uniforms).rgb, float3(0.33333));
 
             horizontal += averagePixel * gx[i][j];
             vertical += averagePixel * gy[i][j];
@@ -47,7 +48,7 @@ fragment float4 fragment_edge(VertexOut interpolated [[stage_in]],
 
     float4 edgeColor = float4(0.0);
     float4 bgColor = float4(1.0);
-    float edgeIntensity = applyKernel(Gx, Gy, video, uv, uniforms.cameraResolution);
+    float edgeIntensity = applyKernel(Gx, Gy, video, uv, uniforms.cameraResolution, uniforms);
 
     return mix(edgeColor, bgColor, 1.0 - edgeIntensity);
 }

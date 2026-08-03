@@ -18,9 +18,12 @@ static float2 screenDistort(float2 uv) {
     return uv;
 }
 
-static float3 getVideo(float2 uv, texture2d<float> video, float globalTime) {
+static float3 getVideo(float2 uv,
+                       texture2d<float> video,
+                       float globalTime,
+                       constant Uniforms &uniforms) {
     // Was float2(1.0 - uv.y, 1.0 - uv.x) to stand the sensor's landscape frame
-    // upright; the capture connection handles that now.
+    // upright; sampleVideo handles that now.
     float2 look = uv;
     float window = 1. / (1. + 20. * (look.y - glMod(globalTime / 4., 1.)) *
                                    (look.y - glMod(globalTime / 4., 1.)));
@@ -30,7 +33,7 @@ static float3 getVideo(float2 uv, texture2d<float> video, float globalTime) {
                    (sin(globalTime) * sin(globalTime * 20.) +
                     (0.5 + 0.1 * sin(globalTime * 200.) * cos(globalTime)));
     look.y = glMod(look.y + vShift, 1.);
-    return sampleVideo(video, look).rgb;
+    return sampleVideo(video, look, uniforms).rgb;
 }
 
 fragment float4 fragment_crt(VertexOut interpolated [[stage_in]],
@@ -42,7 +45,7 @@ fragment float4 fragment_crt(VertexOut interpolated [[stage_in]],
 
     float2 uv = fragCoord / uniforms.resolution;
     uv = screenDistort(uv);
-    float3 videoColor = getVideo(uv, video, globalTime);
+    float3 videoColor = getVideo(uv, video, globalTime, uniforms);
 
     // darken corners
     float vigAmt = 3. + .3 * sin(globalTime + 5. * cos(globalTime * 5.));

@@ -30,7 +30,7 @@ fragment float4 fragment_points(VertexOut interpolated [[stage_in]],
                                 texture2d<float> video [[texture(0)]]) {
 
     float2 uv = interpolated.texCoord;
-    float4 color = sampleVideo(video, uv);
+    float4 color = sampleVideo(video, uv, uniforms);
     float avg = (color.r + color.g + color.b) * 0.3333;
 
     return float4(color.rgb * float3(avg * 6.0 - 4.0 + pattern(uv, uniforms.resolution)), 1.0);

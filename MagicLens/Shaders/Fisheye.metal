@@ -52,8 +52,8 @@ fragment float4 fragment_fisheye(VertexOut interpolated [[stage_in]],
     // The original wrote smoothstep(-0.0, 0.0, mask). Equal edges are undefined
     // in both languages and produce NaN under Metal, so use the step this
     // degenerates to.
-    float4 shape1 = float4(sampleVideo(video, fisheye(fragCoord, uniforms.resolution)).rgb,
+    float4 shape1 = float4(sampleVideo(video, fisheye(fragCoord, uniforms.resolution), uniforms).rgb,
                            1.0 - step(0.0, mask));
 
-    return mix(sampleVideo(video, uv), shape1, shape1.a);
+    return mix(sampleVideo(video, uv, uniforms), shape1, shape1.a);
 }

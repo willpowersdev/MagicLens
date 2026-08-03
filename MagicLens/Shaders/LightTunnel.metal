@@ -23,5 +23,5 @@ fragment float4 fragment_lighttunnel(VertexOut interpolated [[stage_in]],
 
     uv = mix(uv, p, step(radius, delta));
 
-    return sampleVideo(video, uv);
+    return sampleVideo(video, uv, uniforms);
 }

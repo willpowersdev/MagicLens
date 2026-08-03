@@ -28,9 +28,9 @@ fragment float4 fragment_delirium(VertexOut interpolated [[stage_in]],
 
     float2 normalizedCoord3 = uv;
 
-    float4 color = sampleVideo(video, normalizedCoord);
-    float4 color2 = sampleVideo(video, normalizedCoord2);
-    float4 color3 = sampleVideo(video, normalizedCoord3);
+    float4 color = sampleVideo(video, normalizedCoord, uniforms);
+    float4 color2 = sampleVideo(video, normalizedCoord2, uniforms);
+    float4 color3 = sampleVideo(video, normalizedCoord3, uniforms);
 
     float4 finalColor = mix(mix(color, color2, mix(0.4, 0.6, unitDrunk1)), color3, 0.4);
     float mag = length(finalColor);

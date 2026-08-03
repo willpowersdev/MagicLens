@@ -51,7 +51,7 @@ fragment float4 fragment_antifisheye(VertexOut interpolated [[stage_in]],
 
     //Second part of cheat
     //for round effect, not elliptical
-    float3 col = sampleVideo(video, float2(uv.x, -uv.y * prop)).rgb;
+    float3 col = sampleVideo(video, float2(uv.x, -uv.y * prop), uniforms).rgb;
 
     return float4(col, 1.0);
 }

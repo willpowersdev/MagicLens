@@ -34,6 +34,6 @@ fragment float4 fragment_infrared(VertexOut interpolated [[stage_in]],
                                   texture2d<float> video [[texture(0)]]) {
 
     float2 uv = interpolated.texCoord;
-    float greyValueA = greyScale(sampleVideo(video, uv).rgb);
+    float greyValueA = greyScale(sampleVideo(video, uv, uniforms).rgb);
     return float4(heatMap(greyValueA), 1.0);
 }

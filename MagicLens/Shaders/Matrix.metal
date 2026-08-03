@@ -98,8 +98,8 @@ fragment float4 fragment_matrix(VertexOut interpolated [[stage_in]],
         }
     }
 
-    result = result * length(sampleVideo(video, uv).rgb) +
-             0.22 * float4(0.0, sampleVideo(video, uv).g, 0.0, 1.0);
+    result = result * length(sampleVideo(video, uv, uniforms).rgb) +
+             0.22 * float4(0.0, sampleVideo(video, uv, uniforms).g, 0.0, 1.0);
     if (result.b < 0.5) {
         result.b = result.g * 0.5;
     }
