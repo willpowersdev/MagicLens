@@ -12,20 +12,38 @@ struct CameraView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
+    /// How far a finger must travel before it counts as tracking rather than a
+    /// tap. Anything above zero is enough to keep taps out of the recogniser;
+    /// this is roughly UIKit's own slop.
+    private static let dragActivationDistance: CGFloat = 10
+
     var body: some View {
-        GeometryReader { proxy in
-            MetalCameraView(controller: controller, isPaused: isShowingPicker)
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            controller.touch.normalized = SIMD2(
-                                Float(value.location.x / proxy.size.width),
-                                Float(value.location.y / proxy.size.height))
-                        }
-                )
-        }
-        .ignoresSafeArea()
-        .overlay(alignment: .bottom) {
+        ZStack(alignment: .bottom) {
+            GeometryReader { proxy in
+                MetalCameraView(controller: controller, isPaused: isShowingPicker)
+                    // Only engages once a finger has actually travelled. The
+                    // original used minimumDistance 0, which claimed every touch
+                    // the instant it landed — including taps on the buttons —
+                    // and that held iOS's system gesture gate, which then sat on
+                    // the picker's presentation for a full second before timing
+                    // out. Requiring real movement means a tap never starts a
+                    // continuous recogniser, and the sheet opens immediately.
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: Self.dragActivationDistance)
+                            .onChanged { value in
+                                controller.touch.normalized = SIMD2(
+                                    Float(value.location.x / proxy.size.width),
+                                    Float(value.location.y / proxy.size.height))
+                            }
+                    )
+            }
+            .ignoresSafeArea()
+
+            // Inside the safe area, deliberately. As an .overlay applied after
+            // .ignoresSafeArea() these aligned to the physical screen bottom,
+            // which put them in the home indicator's region — and tapping there
+            // made the system gesture gate hold the sheet presentation until it
+            // timed out, about a second later.
             controls
         }
         .sheet(isPresented: $isShowingPicker) {
@@ -56,6 +74,7 @@ struct CameraView: View {
                 Image("glitch_selector")
                     .resizable()
                     .frame(width: 64, height: 64)
+                    .clipShape(.rect(cornerRadius: 14, style: .continuous))
             }
             .accessibilityLabel("Choose effect")
 
@@ -73,7 +92,7 @@ struct CameraView: View {
             .accessibilityLabel("Switch camera")
         }
         .padding(.horizontal, 24)
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
     }
 }
 
