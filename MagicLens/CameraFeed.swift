@@ -37,7 +37,6 @@ final class CameraFeed: NSObject {
     /// Also guarded by `textureLock`: set when the session is built, read by the
     /// renderer to decide whether to mirror.
     private var frontFacing = true
-    private var hasLoggedFormat = false
 
     /// Whether the running session is the selfie camera, and so wants mirroring.
     var isFrontFacing: Bool {
@@ -186,7 +185,6 @@ final class CameraFeed: NSObject {
             // sideways with nothing to show for it; sampling always applies.
             textureLock.lock()
             frontFacing = device.position == .front
-            hasLoggedFormat = false
             textureLock.unlock()
 
             session.startRunning()
@@ -239,14 +237,6 @@ extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate {
         // below recycle it.
         textureLock.lock()
         rgbaTexture = texture
-        if !hasLoggedFormat {
-            hasLoggedFormat = true
-            // Landscape here means the sensor's own orientation reached us
-            // unrotated, which is what the sampling correction assumes.
-            print("[MagicLens] camera buffer \(width)x\(height), "
-                  + "\(width > height ? "landscape" : "portrait"), "
-                  + "front: \(frontFacing)")
-        }
         textureLock.unlock()
 
         CVMetalTextureCacheFlush(textureCache, 0)

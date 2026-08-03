@@ -63,14 +63,18 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// zero rather than mid-animation.
     private var startDate = Date()
 
-    /// Caps how many frames may be queued for the GPU at once.
+    /// Caps how many frames may be outstanding at once.
     ///
-    /// One, not two: these shaders are heavy enough that a queued frame is real
-    /// GPU time, and anything already queued has to drain before the system
-    /// compositor can get its own work through. Keeping at most one outstanding
-    /// bounds how long a sheet or alert animation waits behind us, at the cost
-    /// of a little throughput we don't have to spare anyway.
+    /// Released from the drawable's *presented* handler rather than the command
+    /// buffer's completed handler. A drawable isn't returned to the layer's pool
+    /// when the GPU finishes with it, but when it actually reaches the screen —
+    /// so throttling on completion still let us request drawables faster than
+    /// they came back, drain the pool, and leave `currentDrawable` blocking the
+    /// main thread for its full one second timeout.
     private let inFlightFrames = DispatchSemaphore(value: 1)
+
+    /// Guards against a dropped presented handler wedging rendering forever.
+    private var lastFrameStarted = Date.distantPast
 
     init(controller: CameraController) {
 
@@ -158,12 +162,21 @@ final class Renderer: NSObject, MTKViewDelegate {
     func draw(in view: MTKView) {
 
         // MTKView drives this on the main thread, and `currentDrawable` blocks
-        // its caller when every drawable is still in flight — up to a second
-        // with a heavy fragment shader. Blocking there stalls touch handling and
-        // view presentation, so drop the frame instead of waiting for the GPU.
+        // its caller when the layer has no drawable free. Only ask for one once
+        // the previous frame has actually reached the screen, so that call always
+        // finds a drawable waiting and never stalls touch handling or view
+        // presentation behind the GPU.
         guard inFlightFrames.wait(timeout: .now()) == .success else {
+            // If a presented handler is ever dropped — a cancelled present, the
+            // app being backgrounded mid-frame — the count would never come back
+            // and rendering would stop for good. Recover instead of freezing.
+            if Date().timeIntervalSince(lastFrameStarted) > 0.5 {
+                inFlightFrames.signal()
+            }
             return
         }
+
+        lastFrameStarted = Date()
 
         guard let drawable = view.currentDrawable,
               let descriptor = view.currentRenderPassDescriptor,
@@ -209,9 +222,17 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         encoder.endEncoding()
 
+        #if targetEnvironment(simulator)
+        // The simulator's MTLDrawable protocol omits addPresentedHandler, and it
+        // has none of the drawable pressure this throttle exists to relieve.
         commandBuffer.addCompletedHandler { [inFlightFrames] _ in
             inFlightFrames.signal()
         }
+        #else
+        drawable.addPresentedHandler { [inFlightFrames] _ in
+            inFlightFrames.signal()
+        }
+        #endif
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
