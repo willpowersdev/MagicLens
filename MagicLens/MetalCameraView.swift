@@ -34,5 +34,16 @@ struct MetalCameraView: UIViewRepresentable {
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.setEffect(controller.effect)
         view.isPaused = isPaused
+
+        // autoResizeDrawable sizes the drawable from bounds × contentScaleFactor,
+        // so capping the scale here is what keeps the fragment cost down. The
+        // layer scales the smaller drawable back up to fill the screen.
+        let displayScale = view.traitCollection.displayScale
+        if displayScale > 0 {
+            let capped = min(displayScale, Renderer.maximumDrawableScale)
+            if view.contentScaleFactor != capped {
+                view.contentScaleFactor = capped
+            }
+        }
     }
 }

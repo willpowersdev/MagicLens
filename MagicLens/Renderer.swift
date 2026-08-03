@@ -26,6 +26,14 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     static let colorPixelFormat: MTLPixelFormat = .bgra8Unorm
 
+    /// Ceiling on the drawable's scale factor.
+    ///
+    /// The effects are fragment bound, and on a 3x phone a full res drawable is
+    /// around 3 million pixels — RadialBlur alone samples the video 101 times
+    /// per pixel. The camera itself only supplies 1080p, so rendering above 2x
+    /// costs a great deal and shows almost nothing for it.
+    static let maximumDrawableScale: CGFloat = 2.0
+
     /// Matches the top of the gradient, so a dropped frame is invisible.
     static let clearColor = MTLClearColor(red: 0.118, green: 0.227, blue: 0.541, alpha: 1.0)
 
@@ -55,10 +63,14 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// zero rather than mid-animation.
     private var startDate = Date()
 
-    /// Caps how many frames may be queued for the GPU at once. Two keeps the
-    /// pipeline fed while leaving a drawable free, so `currentDrawable` never
-    /// has to block the main thread.
-    private let inFlightFrames = DispatchSemaphore(value: 2)
+    /// Caps how many frames may be queued for the GPU at once.
+    ///
+    /// One, not two: these shaders are heavy enough that a queued frame is real
+    /// GPU time, and anything already queued has to drain before the system
+    /// compositor can get its own work through. Keeping at most one outstanding
+    /// bounds how long a sheet or alert animation waits behind us, at the cost
+    /// of a little throughput we don't have to spare anyway.
+    private let inFlightFrames = DispatchSemaphore(value: 1)
 
     init(controller: CameraController) {
 
