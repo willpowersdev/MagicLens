@@ -16,7 +16,7 @@ struct CameraView: View {
         ZStack(alignment: .bottom) {
             // No gesture here: touch tracking lives in the MTKView itself.
             // See TouchTrackingMTKView.
-            MetalCameraView(controller: controller, isPaused: isShowingPicker)
+            MetalCameraView(controller: controller)
                 .ignoresSafeArea()
 
             // Inside the safe area, deliberately — at the physical screen bottom

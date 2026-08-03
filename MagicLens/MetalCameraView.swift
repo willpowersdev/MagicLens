@@ -13,11 +13,6 @@ struct MetalCameraView: UIViewRepresentable {
 
     let controller: CameraController
 
-    /// Rendering stops while something covers the view. The camera isn't visible
-    /// behind a sheet, and the effects are expensive enough that leaving them
-    /// running competes with the presentation animation.
-    var isPaused: Bool = false
-
     func makeCoordinator() -> Renderer {
         Renderer(controller: controller)
     }
@@ -41,7 +36,12 @@ struct MetalCameraView: UIViewRepresentable {
 
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.setEffect(controller.effect)
-        view.isPaused = isPaused
+
+        // Never paused. Pausing stops the view's CADisplayLink, and that display
+        // link is what wakes the main run loop each frame — without it an idle
+        // run loop has nothing to drive the Core Animation commit, so a state
+        // change can sit unrendered until something unrelated happens to wake
+        // it. Rendering a hidden frame is far cheaper than that stall.
 
         // autoResizeDrawable sizes the drawable from bounds × contentScaleFactor,
         // so capping the scale here is what keeps the fragment cost down. The
