@@ -14,7 +14,7 @@ struct CameraView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            MetalCameraView(controller: controller)
+            MetalCameraView(controller: controller, isPaused: isShowingPicker)
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in

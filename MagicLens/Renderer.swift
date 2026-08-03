@@ -55,6 +55,11 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// zero rather than mid-animation.
     private var startDate = Date()
 
+    /// Caps how many frames may be queued for the GPU at once. Two keeps the
+    /// pipeline fed while leaving a drawable free, so `currentDrawable` never
+    /// has to block the main thread.
+    private let inFlightFrames = DispatchSemaphore(value: 2)
+
     init(controller: CameraController) {
 
         self.device = controller.device
@@ -140,10 +145,19 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
 
+        // MTKView drives this on the main thread, and `currentDrawable` blocks
+        // its caller when every drawable is still in flight — up to a second
+        // with a heavy fragment shader. Blocking there stalls touch handling and
+        // view presentation, so drop the frame instead of waiting for the GPU.
+        guard inFlightFrames.wait(timeout: .now()) == .success else {
+            return
+        }
+
         guard let drawable = view.currentDrawable,
               let descriptor = view.currentRenderPassDescriptor,
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            inFlightFrames.signal()
             return
         }
 
@@ -182,6 +196,11 @@ final class Renderer: NSObject, MTKViewDelegate {
                                       indexBufferOffset: 0)
 
         encoder.endEncoding()
+
+        commandBuffer.addCompletedHandler { [inFlightFrames] _ in
+            inFlightFrames.signal()
+        }
+
         commandBuffer.present(drawable)
         commandBuffer.commit()
     }

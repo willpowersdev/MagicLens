@@ -13,6 +13,11 @@ struct MetalCameraView: UIViewRepresentable {
 
     let controller: CameraController
 
+    /// Rendering stops while something covers the view. The camera isn't visible
+    /// behind a sheet, and the effects are expensive enough that leaving them
+    /// running competes with the presentation animation.
+    var isPaused: Bool = false
+
     func makeCoordinator() -> Renderer {
         Renderer(controller: controller)
     }
@@ -28,5 +33,6 @@ struct MetalCameraView: UIViewRepresentable {
 
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.setEffect(controller.effect)
+        view.isPaused = isPaused
     }
 }
