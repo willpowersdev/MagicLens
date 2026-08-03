@@ -6,6 +6,38 @@
 import MetalKit
 import SwiftUI
 
+/// Tracks where a finger is so the shaders can follow it.
+///
+/// Plain UIResponder touch handling rather than a SwiftUI gesture, which is how
+/// the original UIKit version did it: no recogniser to arbitrate against the
+/// buttons layered over this view.
+final class TouchTrackingMTKView: MTKView {
+
+    var touch: TouchState?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        track(touches)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesMoved(touches, with: event)
+        track(touches)
+    }
+
+    private func track(_ touches: Set<UITouch>) {
+        guard let first = touches.first,
+              bounds.width > 0,
+              bounds.height > 0 else {
+            return
+        }
+
+        let location = first.location(in: self)
+        touch?.normalized = SIMD2(Float(location.x / bounds.width),
+                                  Float(location.y / bounds.height))
+    }
+}
+
 /// SwiftUI has no native Metal view, so the MTKView is bridged. The renderer
 /// doubles as the representable's coordinator, which gives it exactly the
 /// lifetime SwiftUI expects to manage.
@@ -18,19 +50,12 @@ struct MetalCameraView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> MTKView {
-        let view = MTKView(frame: .zero, device: controller.device)
+        let view = TouchTrackingMTKView(frame: .zero, device: controller.device)
+        view.touch = controller.touch
         view.delegate = context.coordinator
         view.colorPixelFormat = Renderer.colorPixelFormat
         view.clearColor = Renderer.clearColor
         view.isOpaque = true
-
-        // The camera view takes no part in touch handling — no gesture, and no
-        // touchesBegan/Moved overrides. Every form of touch handling tried here
-        // brought back a roughly one second stall before the effect picker would
-        // appear, and removing it is the only thing that ever cleared it. The
-        // shaders read a fixed centre touch point as a result.
-        view.isUserInteractionEnabled = false
-
         return view
     }
 
