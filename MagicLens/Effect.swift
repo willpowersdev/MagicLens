@@ -24,6 +24,7 @@ struct Effect: Identifiable, Hashable {
     static let lightTunnel = Effect(name: "lighttunnel", title: "Light Tunnel")
     static let edge = Effect(name: "edge", title: "Edge")
     static let fisheye = Effect(name: "fisheye", title: "Fisheye")
+    static let antiFisheye = Effect(name: "antifisheye", title: "Anti-Fisheye")
     static let radialBlur = Effect(name: "radialblur", title: "Radial Blur")
     static let matrix = Effect(name: "matrix", title: "Inside the Matrix")
     static let crt = Effect(name: "crt", title: "Old TV")
@@ -38,6 +39,7 @@ struct Effect: Identifiable, Hashable {
         .lightTunnel,
         .edge,
         .fisheye,
+        .antiFisheye,
         .radialBlur,
         .matrix,
         .crt

@@ -2,7 +2,7 @@
 //  AntiFisheye.metal
 //  MagicLens
 //
-//  Ported from antifisheye.fsh. Not currently listed in the glitch picker.
+//  Ported from antifisheye.fsh.
 //
 
 #include "ShaderCommon.h"
@@ -25,8 +25,15 @@ fragment float4 fragment_antifisheye(VertexOut interpolated [[stage_in]],
     // distance of pixel from center
     float r = sqrt(dot(d, d));
     //amount of effect
+    //
+    // The original divided the touch point by resolution.x, because the shader
+    // came from a demo whose uniform was in pixels. Ours is already normalised
+    // 0-1, so that term collapsed to about 0.0004 and power sat near -0.5 no
+    // matter where the screen was touched. Using it directly restores the sweep
+    // the shader was written for: fisheye on one side, flat in the middle,
+    // anti-fisheye on the other.
     float power = (2.0 * 3.141592 / (2.0 * sqrt(dot(m, m)))) *
-                  (uniforms.touchPoint.x / uniforms.resolution.x - 0.5);
+                  (uniforms.touchPoint.x - 0.5);
     //radius of 1:1 effect
     float bind;
     if (power > 0.0) {
