@@ -19,7 +19,12 @@ final class CameraFeed: NSObject {
     private var captureSession:AVCaptureSession?
     private var captureDevice:AVCaptureDevice?
     private var videoOutput:AVCaptureVideoDataOutput?
+    private var audioOutput:AVCaptureAudioDataOutput?
     private var cameraPosition: AVCaptureDevice.Position = .front
+
+    /// Handed each microphone buffer, on `audioQueue`. Set by the controller so
+    /// the feed doesn't need to know the recorder exists.
+    var onAudioSample: ((CMSampleBuffer) -> Void)?
 
     /// AVCaptureSession configuration and start/stop must stay off the main
     /// thread — they block for as long as the hardware takes to come up.
@@ -28,6 +33,8 @@ final class CameraFeed: NSObject {
     /// Frames are delivered here, not on main, so per-frame work never competes
     /// with the UI or the render loop.
     private let videoQueue = DispatchQueue(label: "com.ion6.MagicLens.video")
+
+    private let audioQueue = DispatchQueue(label: "com.ion6.MagicLens.audio")
 
     /// Written on `videoQueue`, read on whatever thread draws. Guarded by
     /// `textureLock`.
@@ -38,11 +45,27 @@ final class CameraFeed: NSObject {
     /// renderer to decide whether to mirror.
     private var frontFacing = true
 
+    /// The clock the capture session stamps its sample buffers against. Also
+    /// guarded by `textureLock`.
+    private var sessionClock: CMClock?
+
     /// Whether the running session is the selfie camera, and so wants mirroring.
     var isFrontFacing: Bool {
         textureLock.lock()
         defer { textureLock.unlock() }
         return frontFacing
+    }
+
+    /// The current time on the capture session's clock.
+    ///
+    /// Rendered frames are stamped with this rather than the host clock so that
+    /// picture and sound share one timeline — the microphone's buffers already
+    /// arrive on it. Falls back to the host clock before a session exists, which
+    /// is what the session uses on iOS anyway.
+    var captureTime: CMTime {
+        textureLock.lock()
+        defer { textureLock.unlock() }
+        return CMClockGetTime(sessionClock ?? CMClockGetHostTimeClock())
     }
 
     /// The most recent camera frame, as a Metal texture ready for sampling.
@@ -177,6 +200,9 @@ final class CameraFeed: NSObject {
 
             session.addOutput(output)
             session.sessionPreset = AVCaptureSession.Preset.high
+
+            addAudio(to: session)
+
             session.commitConfiguration()
 
             // Orientation is corrected at sample time in the shader rather than
@@ -185,6 +211,7 @@ final class CameraFeed: NSObject {
             // sideways with nothing to show for it; sampling always applies.
             textureLock.lock()
             frontFacing = device.position == .front
+            sessionClock = session.synchronizationClock
             textureLock.unlock()
 
             session.startRunning()
@@ -193,12 +220,51 @@ final class CameraFeed: NSObject {
             assertionFailure("error: \(error.localizedDescription)")
         }
     }
+
+    /// Adds the microphone. Must be called inside the session's configuration
+    /// block, on `sessionQueue`.
+    ///
+    /// Failure here is deliberately quiet: if the microphone is refused or
+    /// unavailable, the camera should still work and recordings simply come out
+    /// silent.
+    private func addAudio(to session: AVCaptureSession) {
+
+        // The capture session configures the application audio session itself.
+        // Doing it by hand here — activating mid-configuration on this queue —
+        // produced FigAudioSession errors, so leave it to AVFoundation.
+
+        guard let microphone = AVCaptureDevice.default(for: .audio),
+              let input = try? AVCaptureDeviceInput(device: microphone),
+              session.canAddInput(input) else {
+            return
+        }
+
+        session.addInput(input)
+
+        let output = AVCaptureAudioDataOutput()
+        output.setSampleBufferDelegate(self, queue: audioQueue)
+
+        guard session.canAddOutput(output) else {
+            return
+        }
+
+        session.addOutput(output)
+        audioOutput = output
+    }
 }
 
 
-extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate {
-    
+extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate,
+                       AVCaptureAudioDataOutputSampleBufferDelegate {
+
     func captureOutput(_ captureOutput: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+
+        // Both outputs land here. Checking the type rather than comparing
+        // against the stored output keeps this free of cross-thread reads.
+        if captureOutput is AVCaptureAudioDataOutput {
+            onAudioSample?(sampleBuffer)
+            return
+        }
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             return

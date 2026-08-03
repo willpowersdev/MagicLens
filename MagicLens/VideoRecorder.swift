@@ -6,52 +6,78 @@
 import AVFoundation
 import CoreVideo
 
-/// Writes the rendered frames — effects and all — to an H.264 file.
+/// Writes the rendered frames — effects and all — to an H.264 file with sound.
 ///
 /// This deliberately records what the renderer produces rather than what the
 /// camera captures, since the effect is the point. The renderer hands over a
-/// pixel buffer from this writer's own pool each frame, so the frames go
-/// straight from the GPU into the file with no intermediate copy of our own.
+/// pixel buffer from this writer's own pool each frame, so frames go straight
+/// from the GPU into the file with no intermediate copy of our own.
 ///
-/// Frames are appended from a Metal completion handler, so every entry point
-/// here can be called from any thread and takes `lock`.
+/// Everything that touches the writer runs on `writerQueue`; `state` and the
+/// stored inputs are guarded by `lock`. Callers come from the render loop, a
+/// Metal completion handler and the capture session's audio queue, so no entry
+/// point here may assume a thread — or block one. Building an AVAssetWriter is
+/// slow enough to stall the render loop visibly, which is why setup is
+/// asynchronous and happens exactly once per recording.
 final class VideoRecorder {
 
-    /// Set by the controller when the user taps record. The renderer notices on
-    /// its next frame, once the drawable size is known.
+    private enum State {
+        case idle
+        /// The writer is being built on `writerQueue`.
+        case preparing
+        case writing
+        /// Setup failed. Never retried — retrying per frame is what made the
+        /// app appear to hang.
+        case failed
+    }
+
+    /// Set by the controller when the user taps record.
     var isRequested: Bool {
         get { lock.withLock { requested } }
         set { lock.withLock { requested = newValue } }
     }
 
-    var isWriting: Bool {
-        lock.withLock { writer != nil }
-    }
-
     private let lock = NSLock()
+    private let writerQueue = DispatchQueue(label: "com.ion6.MagicLens.writer")
 
+    private var state: State = .idle
     private var requested = false
+
     private var writer: AVAssetWriter?
     private var input: AVAssetWriterInput?
+    private var audioInput: AVAssetWriterInput?
     private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var sessionStarted = false
     private var url: URL?
 
-    /// Spins up the writer for a given frame size. Safe to call every frame —
-    /// it does nothing once a writer exists.
-    func beginIfNeeded(size: CGSize) {
+    /// Asks for a writer at this frame size. Safe to call every frame: it starts
+    /// setup at most once and returns immediately, doing no work on the caller's
+    /// thread.
+    func prepare(size: CGSize) {
         lock.lock()
-        defer { lock.unlock() }
 
-        guard requested, writer == nil else {
+        guard requested, state == .idle else {
+            lock.unlock()
             return
         }
+
+        state = .preparing
+        lock.unlock()
+
+        writerQueue.async { [weak self] in
+            self?.makeWriter(size: size)
+        }
+    }
+
+    /// Runs on `writerQueue`.
+    private func makeWriter(size: CGSize) {
 
         // H.264 wants even dimensions.
         let width = Int(size.width.rounded()) & ~1
         let height = Int(size.height.rounded()) & ~1
 
         guard width > 0, height > 0 else {
+            lock.withLock { state = .failed }
             return
         }
 
@@ -59,19 +85,19 @@ final class VideoRecorder {
             .appendingPathComponent("MagicLens-\(UUID().uuidString).mov")
 
         guard let writer = try? AVAssetWriter(outputURL: destination, fileType: .mov) else {
-            assertionFailure("Couldn't create the asset writer")
+            lock.withLock { state = .failed }
             return
         }
 
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+        let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height
         ])
-        input.expectsMediaDataInRealTime = true
+        video.expectsMediaDataInRealTime = true
 
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
+            assetWriterInput: video,
             sourcePixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferWidthKey as String: width,
@@ -79,31 +105,58 @@ final class VideoRecorder {
                 kCVPixelBufferMetalCompatibilityKey as String: true
             ])
 
-        guard writer.canAdd(input) else {
-            assertionFailure("Couldn't add the video input")
+        guard writer.canAdd(video) else {
+            lock.withLock { state = .failed }
             return
         }
 
-        writer.add(input)
+        writer.add(video)
+
+        // Audio is optional: if the microphone was refused or is unavailable
+        // there simply won't be any buffers, and the movie comes out silent
+        // rather than not at all.
+        let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVNumberOfChannelsKey: 1,
+            AVSampleRateKey: 44_100,
+            AVEncoderBitRateKey: 64_000
+        ])
+        audio.expectsMediaDataInRealTime = true
+
+        let addedAudio = writer.canAdd(audio)
+        if addedAudio {
+            writer.add(audio)
+        }
 
         guard writer.startWriting() else {
-            assertionFailure("Couldn't start writing: \(String(describing: writer.error))")
+            lock.withLock { state = .failed }
+            try? FileManager.default.removeItem(at: destination)
             return
         }
 
+        lock.lock()
         self.writer = writer
-        self.input = input
+        self.input = video
+        self.audioInput = addedAudio ? audio : nil
         self.adaptor = adaptor
         self.url = destination
+        // A stop between asking and finishing setup leaves `requested` false;
+        // honour it rather than starting to write anyway.
+        self.state = requested ? .writing : .idle
+        let abandoned = !requested
+        lock.unlock()
+
+        if abandoned {
+            finish { _ in }
+        }
     }
 
     /// A buffer from the writer's pool for the renderer to blit this frame into.
-    /// Returns nil when there is nothing to record or the pool is exhausted.
     func nextPixelBuffer() -> CVPixelBuffer? {
         lock.lock()
         defer { lock.unlock() }
 
-        guard requested, let pool = adaptor?.pixelBufferPool else {
+        guard requested, state == .writing, let pool = adaptor?.pixelBufferPool else {
             return nil
         }
 
@@ -116,19 +169,27 @@ final class VideoRecorder {
     }
 
     /// Called once the GPU has finished writing into `buffer`.
-    func append(_ buffer: CVPixelBuffer) {
+    ///
+    /// `time` is taken when the frame is encoded rather than here, and comes
+    /// from the capture session's clock — the same timeline the microphone
+    /// stamps its buffers on, which is what keeps sound in step with picture.
+    func append(_ buffer: CVPixelBuffer, at time: CMTime) {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let writer, let input, let adaptor, writer.status == .writing else {
+        guard state == .writing,
+              let writer,
+              let input,
+              let adaptor,
+              writer.status == .writing else {
             return
         }
 
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
-
+        // Video opens the session. Audio arriving beforehand is discarded, so
+        // the file always starts on a picture frame.
         if !sessionStarted {
             sessionStarted = true
-            writer.startSession(atSourceTime: now)
+            writer.startSession(atSourceTime: time)
         }
 
         // Dropping a frame is far better than stalling the render loop waiting
@@ -137,28 +198,56 @@ final class VideoRecorder {
             return
         }
 
-        adaptor.append(buffer, withPresentationTime: now)
+        adaptor.append(buffer, withPresentationTime: time)
+    }
+
+    /// Called from the capture session's audio queue.
+    func appendAudio(_ sample: CMSampleBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard state == .writing,
+              let writer,
+              let audioInput,
+              writer.status == .writing,
+              sessionStarted,
+              audioInput.isReadyForMoreMediaData else {
+            return
+        }
+
+        audioInput.append(sample)
     }
 
     /// Closes the file. `completion` runs on the main queue with the finished
-    /// movie, or nil if nothing was written.
+    /// movie, or nil if nothing usable was written.
+    ///
+    /// Dispatched onto `writerQueue`, so a stop that arrives while the writer is
+    /// still being built simply queues behind it rather than racing it.
     func finish(completion: @escaping (URL?) -> Void) {
+        writerQueue.async { [weak self] in
+            self?.finishOnWriterQueue(completion: completion)
+        }
+    }
+
+    private func finishOnWriterQueue(completion: @escaping (URL?) -> Void) {
         lock.lock()
 
         guard let writer, let input, sessionStarted else {
-            // Stopped before a single frame landed — throw the file away.
+            // Never got a frame in — throw the file away.
             let stale = url
             reset()
             lock.unlock()
+
             if let stale {
                 try? FileManager.default.removeItem(at: stale)
             }
-            completion(nil)
+            DispatchQueue.main.async { completion(nil) }
             return
         }
 
         let destination = url
         input.markAsFinished()
+        audioInput?.markAsFinished()
         reset()
         lock.unlock()
 
@@ -174,8 +263,10 @@ final class VideoRecorder {
     private func reset() {
         writer = nil
         input = nil
+        audioInput = nil
         adaptor = nil
         sessionStarted = false
         url = nil
+        state = .idle
     }
 }

@@ -255,7 +255,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             return
         }
 
-        recorder.beginIfNeeded(size: size)
+        recorder.prepare(size: size)
 
         guard let buffer = recorder.nextPixelBuffer(),
               let (destination, wrapper) = recordingTarget(for: buffer),
@@ -279,11 +279,17 @@ final class Renderer: NSObject, MTKViewDelegate {
                   destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
         blit.endEncoding()
 
+        // Stamped now rather than in the completion handler, so the time
+        // reflects when the frame was drawn rather than when the GPU happened to
+        // finish with it. Taken from the capture session's clock, which is the
+        // same timeline the microphone's buffers arrive on.
+        let presentationTime = feed.captureTime
+
         // Appended once the GPU has actually filled the buffer. `wrapper` is
         // captured purely to keep the texture alive until then.
         commandBuffer.addCompletedHandler { [recorder] _ in
             _ = wrapper
-            recorder.append(buffer)
+            recorder.append(buffer, at: presentationTime)
         }
     }
 }

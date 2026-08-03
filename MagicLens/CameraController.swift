@@ -41,6 +41,12 @@ final class CameraController {
 
         self.device = device
         self.feed = CameraFeed(metalDevice: device)
+
+        // The feed doesn't know the recorder exists; it just hands over buffers.
+        // The recorder ignores them unless it's writing.
+        feed.onAudioSample = { [recorder] sample in
+            recorder.appendAudio(sample)
+        }
     }
 
     func start() {

@@ -22,6 +22,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>This app requires use of the camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Recordings capture sound along with the picture.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
