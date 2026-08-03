@@ -1,11 +1,11 @@
 //
-//  GlitchPicker.swift
+//  FilterPicker.swift
 //  MagicLens
 //
 
 import SwiftUI
 
-struct GlitchPicker: View {
+struct FilterPicker: View {
 
     @Binding var selection: Effect
 
@@ -44,5 +44,5 @@ struct GlitchPicker: View {
 
 #Preview {
     @Previewable @State var selection = Effect.fisheye
-    GlitchPicker(selection: $selection)
+    FilterPicker(selection: $selection)
 }

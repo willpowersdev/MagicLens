@@ -29,7 +29,7 @@ struct CameraView: View {
             controls
         }
         .sheet(isPresented: $isShowingPicker) {
-            GlitchPicker(selection: $controller.effect)
+            FilterPicker(selection: $controller.effect)
         }
         .onAppear {
             controller.start()
