@@ -34,6 +34,15 @@ struct Uniforms {
     /// 0 when nobody is there, ramping to 1 when someone is. Fade an effect
     /// with this rather than switching on it, or it will pop.
     float facePresence;
+
+    /// Eye and pupil centres, in that same uv space, from Vision's landmarks.
+    float2 leftEye;
+    float2 rightEye;
+    float2 leftPupil;
+    float2 rightPupil;
+    /// Separate from facePresence: landmarks arrive far less often than boxes
+    /// and go stale sooner, so either can be good while the other isn't.
+    float eyePresence;
 };
 
 struct VertexOut {

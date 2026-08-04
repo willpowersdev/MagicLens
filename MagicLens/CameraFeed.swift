@@ -343,9 +343,17 @@ extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate,
         textureLock.lock()
         rgbaTexture = texture
         bufferIsLandscape = width > height
+        let landscape = bufferIsLandscape
+        let mirrored = frontFacing
         textureLock.unlock()
 
         CVMetalTextureCacheFlush(textureCache, 0)
+
+        // Offered every frame; the tracker decides how few to actually run.
+        faces.analyze(pixelBuffer,
+                      bufferIsLandscape: landscape,
+                      mirrored: mirrored,
+                      now: CFAbsoluteTimeGetCurrent())
     }
 }
 

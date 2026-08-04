@@ -24,6 +24,14 @@ struct Uniforms {
     var faceSize: SIMD2<Float>
     /// 0 when nobody is there, ramping to 1 when someone is.
     var facePresence: Float
+
+    /// Eye and pupil centres, in that same uv space, from Vision's landmarks.
+    var leftEye: SIMD2<Float>
+    var rightEye: SIMD2<Float>
+    var leftPupil: SIMD2<Float>
+    var rightPupil: SIMD2<Float>
+    /// Separate from facePresence — landmarks arrive far less often.
+    var eyePresence: Float
 }
 
 /// Draws a full screen quad textured with the latest camera frame and run
@@ -249,7 +257,12 @@ final class Renderer: NSObject, MTKViewDelegate {
                 videoMirrored: feed.isFrontFacing ? 1.0 : 0.0,
                 faceCenter: face.center,
                 faceSize: face.size,
-                facePresence: face.presence)
+                facePresence: face.presence,
+                leftEye: face.leftEye,
+                rightEye: face.rightEye,
+                leftPupil: face.leftPupil,
+                rightPupil: face.rightPupil,
+                eyePresence: face.eyePresence)
 
             // Small enough to go inline rather than through an MTLBuffer.
             encoder.setFragmentBytes(&uniforms,
@@ -280,7 +293,12 @@ final class Renderer: NSObject, MTKViewDelegate {
                 videoMirrored: 0,
                 faceCenter: face.center,
                 faceSize: face.size,
-                facePresence: face.presence)
+                facePresence: face.presence,
+                leftEye: face.leftEye,
+                rightEye: face.rightEye,
+                leftPupil: face.leftPupil,
+                rightPupil: face.rightPupil,
+                eyePresence: face.eyePresence)
 
             encoder.setRenderPipelineState(overlay)
             encoder.setFragmentBytes(&overlayUniforms,

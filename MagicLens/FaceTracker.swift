@@ -5,6 +5,7 @@
 
 import AVFoundation
 import CoreGraphics
+import Vision
 import simd
 
 /// Where a face is on screen, in the coordinate space the effects already use.
@@ -20,9 +21,27 @@ struct TrackedFace: Equatable {
     /// rather than snapping on and off.
     var presence: Float
 
+    /// Eye and pupil centres, in that same uv space. Vision's naming: "left" is
+    /// the subject's left, which on a mirrored selfie is the one on the left of
+    /// the screen and on the back camera is the one on the right.
+    var leftEye: SIMD2<Float>
+    var rightEye: SIMD2<Float>
+    var leftPupil: SIMD2<Float>
+    var rightPupil: SIMD2<Float>
+
+    /// Separate from `presence`: the box comes from the capture hardware every
+    /// frame, the eyes from Vision far less often, and either can be missing
+    /// while the other is good.
+    var eyePresence: Float
+
     static let none = TrackedFace(center: SIMD2(0.5, 0.5),
                                   size: SIMD2(0, 0),
-                                  presence: 0)
+                                  presence: 0,
+                                  leftEye: SIMD2(0.5, 0.5),
+                                  rightEye: SIMD2(0.5, 0.5),
+                                  leftPupil: SIMD2(0.5, 0.5),
+                                  rightPupil: SIMD2(0.5, 0.5),
+                                  eyePresence: 0)
 }
 
 /// Shared face tracking, published to every effect through the uniforms.
@@ -48,11 +67,26 @@ final class FaceTracker {
     /// Seconds to fade fully in or out.
     private static let fadeSeconds: Float = 0.25
 
+    /// Landmarks are expensive enough that running them every frame would eat
+    /// the budget the effects need, and eyes don't move fast enough to warrant
+    /// it. Between runs the smoothing carries them.
+    private static let landmarkInterval = 1.0 / 12.0
+
+    /// Landmarks go stale faster than the box does — a head turn invalidates
+    /// them while the face is still perfectly well tracked.
+    private static let landmarkGraceSeconds = 0.5
+
     private let lock = NSLock()
+    private let visionQueue = DispatchQueue(label: "com.ion6.MagicLens.vision")
 
     private var tracked = TrackedFace.none
     private var target: TrackedFace?
     private var lastSeen: CFAbsoluteTime = 0
+
+    private var eyeTarget: TrackedFace?
+    private var lastLandmarks: CFAbsoluteTime = 0
+    private var lastLandmarkAttempt: CFAbsoluteTime = 0
+    private var visionInFlight = false
 
     /// The current face, advanced to `now`. Called once per rendered frame.
     func face(at now: CFAbsoluteTime, elapsed: Float) -> TrackedFace {
@@ -72,7 +106,23 @@ final class FaceTracker {
             tracked.presence += (0 - tracked.presence) * step
         }
 
+        let eyesStale = now - lastLandmarks > Self.landmarkGraceSeconds
+
+        if let eyeTarget, !eyesStale {
+            // Eyes arrive at a twelfth the rate of frames, so they lean harder
+            // on smoothing than the box does — chased too quickly they step.
+            let follow = min(1, Self.followRate * 0.6)
+            tracked.leftEye += (eyeTarget.leftEye - tracked.leftEye) * follow
+            tracked.rightEye += (eyeTarget.rightEye - tracked.rightEye) * follow
+            tracked.leftPupil += (eyeTarget.leftPupil - tracked.leftPupil) * follow
+            tracked.rightPupil += (eyeTarget.rightPupil - tracked.rightPupil) * follow
+            tracked.eyePresence += (1 - tracked.eyePresence) * step
+        } else {
+            tracked.eyePresence += (0 - tracked.eyePresence) * step
+        }
+
         tracked.presence = min(1, max(0, tracked.presence))
+        tracked.eyePresence = min(1, max(0, tracked.eyePresence))
         return tracked
     }
 
@@ -98,9 +148,10 @@ final class FaceTracker {
         lock.lock()
         defer { lock.unlock() }
 
-        let found = TrackedFace(center: SIMD2(Float(box.midX), Float(box.midY)),
-                                size: SIMD2(Float(box.width), Float(box.height)),
-                                presence: 1)
+        var found = TrackedFace.none
+        found.center = SIMD2(Float(box.midX), Float(box.midY))
+        found.size = SIMD2(Float(box.width), Float(box.height))
+        found.presence = 1
 
         // First sighting after an absence starts where it was found, so it
         // doesn't glide in from wherever the last face was.
@@ -111,6 +162,135 @@ final class FaceTracker {
 
         target = found
         lastSeen = now
+    }
+
+    /// Offers a frame to Vision for eye and pupil landmarks.
+    ///
+    /// Called from the video queue for every frame, but only a fraction are
+    /// actually run: landmark detection is far heavier than the hardware's face
+    /// boxes, and one request is allowed in flight at a time so a slow frame
+    /// can't pile up behind itself.
+    func analyze(_ pixelBuffer: CVPixelBuffer,
+                 bufferIsLandscape: Bool,
+                 mirrored: Bool,
+                 now: CFAbsoluteTime) {
+
+        lock.lock()
+        let shouldRun = !visionInFlight && now - lastLandmarkAttempt >= Self.landmarkInterval
+        if shouldRun {
+            visionInFlight = true
+            lastLandmarkAttempt = now
+        }
+        lock.unlock()
+
+        guard shouldRun else {
+            return
+        }
+
+        visionQueue.async { [weak self] in
+            self?.detectLandmarks(in: pixelBuffer,
+                                  bufferIsLandscape: bufferIsLandscape,
+                                  mirrored: mirrored)
+        }
+    }
+
+    /// Runs on `visionQueue`.
+    private func detectLandmarks(in pixelBuffer: CVPixelBuffer,
+                                 bufferIsLandscape: Bool,
+                                 mirrored: Bool) {
+
+        defer {
+            lock.lock()
+            visionInFlight = false
+            lock.unlock()
+        }
+
+        let request = VNDetectFaceLandmarksRequest()
+
+        // Deliberately `.up`, leaving the buffer in its own orientation, so the
+        // results come back in the space the proven inverse transform below
+        // expects. Passing an orientation hint would put them in a rotated space
+        // instead, needing a second, separately-guessed mapping — the sort of
+        // thing that has looked like bad detection before now.
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
+                                            orientation: .up,
+                                            options: [:])
+
+        do {
+            try handler.perform([request])
+        } catch {
+            return
+        }
+
+        // Same rule the box uses — largest wins — so eyes and box agree about
+        // who the subject is when there's more than one person in shot.
+        guard let observations = request.results,
+              let face = observations.max(by: { $0.boundingBox.area < $1.boundingBox.area }),
+              let landmarks = face.landmarks,
+              let left = landmarks.leftEye,
+              let right = landmarks.rightEye else {
+            return
+        }
+
+        let box = face.boundingBox
+
+        func uv(_ region: VNFaceLandmarkRegion2D?) -> SIMD2<Float>? {
+            guard let region, region.pointCount > 0 else {
+                return nil
+            }
+
+            // Region points are normalised inside the face box, so they go up
+            // through the box to image space first.
+            var sum = CGPoint.zero
+            for point in region.normalizedPoints {
+                sum.x += box.origin.x + point.x * box.width
+                sum.y += box.origin.y + point.y * box.height
+            }
+
+            let centre = CGPoint(x: sum.x / CGFloat(region.pointCount),
+                                 y: sum.y / CGFloat(region.pointCount))
+
+            // Vision counts up from the bottom left; the buffer space the
+            // inverse transform works in counts down from the top left.
+            let inBuffer = CGPoint(x: centre.x, y: 1 - centre.y)
+
+            let mapped = Self.uvPoint(fromBuffer: inBuffer,
+                                      rotated: bufferIsLandscape,
+                                      mirrored: mirrored)
+
+            return SIMD2(Float(mapped.x), Float(mapped.y))
+        }
+
+        guard let leftEye = uv(left), let rightEye = uv(right) else {
+            return
+        }
+
+        // Pupils are a single point each, and are the first thing Vision drops
+        // when the eyes are narrowed or turned away — fall back to the eye
+        // centre so an effect anchored to them doesn't jump to the origin.
+        let leftPupil = uv(landmarks.leftPupil) ?? leftEye
+        let rightPupil = uv(landmarks.rightPupil) ?? rightEye
+
+        lock.lock()
+
+        var found = TrackedFace.none
+        found.leftEye = leftEye
+        found.rightEye = rightEye
+        found.leftPupil = leftPupil
+        found.rightPupil = rightPupil
+
+        // First landmarks after a gap start where they were found rather than
+        // sliding in from where a previous face's eyes were.
+        if eyeTarget == nil || CFAbsoluteTimeGetCurrent() - lastLandmarks > Self.landmarkGraceSeconds {
+            tracked.leftEye = leftEye
+            tracked.rightEye = rightEye
+            tracked.leftPupil = leftPupil
+            tracked.rightPupil = rightPupil
+        }
+
+        eyeTarget = found
+        lastLandmarks = CFAbsoluteTimeGetCurrent()
+        lock.unlock()
     }
 
     /// Maps a metadata bounding box into the shaders' uv space.
