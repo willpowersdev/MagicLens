@@ -140,10 +140,30 @@ struct EyeGlowConfiguration: Sendable, Equatable {
     /// compounds and the screen washes out.
     var maximumTrailBrightness: Float = 5.0
 
-    /// How far to chase a new landmark reading in one frame *at 60fps*. The
-    /// actual per-frame figure comes from elapsed time — see
-    /// `follow(forElapsed:)`.
+    /// How far to chase a new landmark reading in one frame *at 60fps*, while
+    /// the head is moving. The actual per-frame figure comes from elapsed time
+    /// — see `follow(forElapsed:motion:)`.
     var landmarkSmoothing: Float = 0.45
+
+    /// The same, while the head is still.
+    ///
+    /// Deliberately far slower. One rate cannot serve both: quick enough to
+    /// keep up with a turning head passes Vision's frame-to-frame jitter
+    /// straight through, and slow enough to sit still lags. Which failure
+    /// matters depends entirely on whether anything is moving.
+    var stillSmoothing: Float = 0.08
+
+    /// Below this speed, in uv per second, the eyes count as still.
+    ///
+    /// Vision's landmarks wander by a little every frame even from a
+    /// completely still head. Divided by the gap between detections that reads
+    /// as a real velocity, and everything downstream believes it: the glow is
+    /// projected along it, and the trail smears in a fresh random direction
+    /// each frame.
+    var stillnessThreshold: Float = 0.05
+
+    /// At and above this speed they count as fully moving.
+    var motionThreshold: Float = 0.40
 
     /// How far ahead of the landmarks to draw, on top of cancelling their
     /// measured age. Covers what the age can't see: Vision's own processing,
@@ -188,6 +208,12 @@ struct EyeGlowConfiguration: Sendable, Equatable {
         copy.maximumTrailBrightness = max(0.1, min(maximumTrailBrightness, 64))
 
         copy.landmarkSmoothing = landmarkSmoothing.clamped(to: 0.01...1)
+        copy.stillSmoothing = stillSmoothing.clamped(to: 0.01...1)
+        copy.stillnessThreshold = stillnessThreshold.clamped(to: 0...4)
+        // Strictly above the stillness figure, or the ramp between them is a
+        // step and the glow snaps between filters as the head starts to move.
+        copy.motionThreshold = max(copy.stillnessThreshold + 0.01,
+                                   motionThreshold.clamped(to: 0...8))
         copy.predictionSeconds = predictionSeconds.clamped(to: 0...0.2)
         copy.minimumTrackingConfidence = minimumTrackingConfidence.clamped(to: 0...1)
 
@@ -213,15 +239,35 @@ struct EyeGlowConfiguration: Sendable, Equatable {
         return pow(trailDecayAt60FPS, Float(clamped * 60))
     }
 
+    /// How much of what the tracker is seeing is real movement rather than
+    /// Vision's own noise: 0 while still, 1 while moving, easing between.
+    ///
+    /// Everything that makes stillness look unsettled is gated on this — the
+    /// chase rate, the prediction and the trail's directional streak all read
+    /// the same velocity, and all three misbehave in the same way when that
+    /// velocity is noise.
+    func motion(forSpeed speed: Float) -> Float {
+        EyeGeometry.smoothstep(stillnessThreshold,
+                               max(motionThreshold, stillnessThreshold + 1e-4),
+                               speed)
+    }
+
     /// How far to move towards the latest landmarks this frame.
     ///
     /// The same reasoning as `decay(forElapsed:)`, and for the same reason: a
     /// fixed per-frame fraction settles in a fixed number of *frames*, so the
     /// glow would trail further behind at 30 than at 120 and there would be no
     /// single value that felt right on both.
-    func follow(forElapsed elapsed: Double) -> Float {
+    ///
+    /// `motion` picks where between the still and moving rates to sit, which
+    /// is what lets the filter be steady and responsive rather than a
+    /// compromise between the two.
+    func follow(forElapsed elapsed: Double, motion: Float = 1) -> Float {
+        let blend = motion.clamped(to: 0...1)
+        let alpha = stillSmoothing + (landmarkSmoothing - stillSmoothing) * blend
+
         let clamped = min(max(elapsed, 1.0 / 240.0), 1.0 / 15.0)
-        return 1 - pow(1 - landmarkSmoothing, Float(clamped * 60))
+        return 1 - pow(1 - alpha, Float(clamped * 60))
     }
 
     /// Never project further ahead than this, however stale the landmarks are.

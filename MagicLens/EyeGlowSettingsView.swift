@@ -71,6 +71,15 @@ struct EyeGlowSettingsView: View {
     private var tracking: some View {
         section("Tracking") {
             slider("Smoothing", value: $configuration.landmarkSmoothing, in: 0.01...1)
+
+            // Lower is steadier. Separate from the figure above because the
+            // two are answering different questions: that one is how quickly
+            // to keep up, this one is how hard to sit still.
+            slider("Steadiness", value: $configuration.stillSmoothing, in: 0.01...1,
+                   format: { String(format: "%.2f", $0) })
+
+            slider("Lead", value: $configuration.predictionSeconds, in: 0...0.2,
+                   format: { String(format: "%.0fms", $0 * 1000) })
             slider("Confidence", value: $configuration.minimumTrackingConfidence, in: 0...1)
             slider("Blink floor", value: $configuration.minimumEyeOpenness, in: 0...1)
             slider("Blink ceiling", value: $configuration.fullEyeOpenness, in: 0...1)

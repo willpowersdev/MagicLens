@@ -210,16 +210,27 @@ final class FaceTracker {
         if let eyeTarget, !eyesStale {
             let settings = storedEyeGlow
 
+            // Whether anything is actually moving. Both eyes are read, and the
+            // faster wins: a head turning about its own axis barely shifts the
+            // far eye, and taking the average would call that stillness.
+            let speed = max(length(eyeTarget.leftVelocity),
+                            length(eyeTarget.rightVelocity))
+            let motion = settings.motion(forSpeed: speed)
+
             // Time-based, so the glow settles in the same number of
-            // milliseconds at any frame rate.
-            let follow = settings.follow(forElapsed: Double(elapsed))
+            // milliseconds at any frame rate, and steadier the stiller the
+            // head is.
+            let follow = settings.follow(forElapsed: Double(elapsed), motion: motion)
 
             // Landmarks describe where the eyes were when Vision ran, which at
             // a twelfth of the frame rate is most of a tenth of a second ago.
             // Chasing that position unchanged is the bulk of the lag, so the
             // reading is carried forward along its own velocity first — the
             // glow then chases where the eyes are rather than where they were.
-            let lead = settings.lead(forLandmarkAge: now - lastLandmarks)
+            //
+            // Scaled by motion, because projecting along a velocity that is
+            // only jitter walks the glow around a face that is sitting still.
+            let lead = settings.lead(forLandmarkAge: now - lastLandmarks) * motion
 
             let leftShift = eyeTarget.leftVelocity * lead
             let rightShift = eyeTarget.rightVelocity * lead
@@ -255,10 +266,13 @@ final class FaceTracker {
             tracked.leftOpenness += (eyeTarget.leftOpenness - tracked.leftOpenness) * follow
             tracked.rightOpenness += (eyeTarget.rightOpenness - tracked.rightOpenness) * follow
 
-            // Taken whole rather than eased: it was already measured across the
-            // gap between detections, which is the interval that matters.
-            tracked.leftVelocity = eyeTarget.leftVelocity
-            tracked.rightVelocity = eyeTarget.rightVelocity
+            // Not eased — it was already measured across the gap between
+            // detections, which is the interval that matters — but faded out
+            // as the head comes to rest. The trail's directional streak reads
+            // this, and a noise velocity points somewhere new every frame,
+            // which is a smear that flickers rather than a trail.
+            tracked.leftVelocity = eyeTarget.leftVelocity * motion
+            tracked.rightVelocity = eyeTarget.rightVelocity * motion
         } else {
             tracked.eyePresence += (0 - tracked.eyePresence) * step
         }

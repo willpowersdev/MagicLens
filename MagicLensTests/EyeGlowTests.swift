@@ -107,6 +107,83 @@ final class EyeGlowTests: XCTestCase {
         }
     }
 
+    // MARK: - Stillness
+
+    /// The complaint this answers: a still head still had a wandering,
+    /// flickering glow. Vision's landmarks move a little every frame, and
+    /// divided by the gap between detections that reads as a real velocity —
+    /// which the prediction projects along and the trail streaks along.
+    func testAStillHeadReadsAsStill() {
+        let configuration = EyeGlowConfiguration()
+
+        XCTAssertEqual(configuration.motion(forSpeed: 0), 0)
+        XCTAssertEqual(configuration.motion(forSpeed: configuration.stillnessThreshold * 0.5),
+                       0, accuracy: 1e-6)
+    }
+
+    func testARealMovementReadsAsMovement() {
+        let configuration = EyeGlowConfiguration()
+
+        XCTAssertEqual(configuration.motion(forSpeed: configuration.motionThreshold),
+                       1, accuracy: 1e-6)
+        XCTAssertEqual(configuration.motion(forSpeed: 50), 1, accuracy: 1e-6)
+    }
+
+    /// A step between the two filters would snap as the head began to move.
+    func testTheChangeBetweenStillAndMovingIsGradual() {
+        let configuration = EyeGlowConfiguration()
+
+        let midpoint = (configuration.stillnessThreshold + configuration.motionThreshold) / 2
+        let middle = configuration.motion(forSpeed: midpoint)
+
+        XCTAssertGreaterThan(middle, 0.1)
+        XCTAssertLessThan(middle, 0.9)
+
+        var previous: Float = -1
+        for speed in stride(from: Float(0), through: 0.6, by: 0.02) {
+            let value = configuration.motion(forSpeed: speed)
+            XCTAssertGreaterThanOrEqual(value, previous)
+            previous = value
+        }
+    }
+
+    /// The whole point of two rates: still is steadier than moving.
+    func testStillnessIsFilteredHarderThanMovement() {
+        let configuration = EyeGlowConfiguration()
+
+        let still = configuration.follow(forElapsed: 1.0 / 60.0, motion: 0)
+        let moving = configuration.follow(forElapsed: 1.0 / 60.0, motion: 1)
+
+        XCTAssertLessThan(still, moving)
+        XCTAssertEqual(still, configuration.stillSmoothing, accuracy: 1e-5)
+        XCTAssertEqual(moving, configuration.landmarkSmoothing, accuracy: 1e-5)
+    }
+
+    /// Being steadier must not mean being frame-rate dependent again.
+    func testTheStillFilterSettlesInTheSameTimeAtAnyFrameRate() {
+        let configuration = EyeGlowConfiguration()
+
+        func remainingAfterOneSecond(atFPS fps: Double) -> Float {
+            let perFrame = configuration.follow(forElapsed: 1.0 / fps, motion: 0)
+            return pow(1 - perFrame, Float(fps))
+        }
+
+        XCTAssertEqual(remainingAfterOneSecond(atFPS: 30),
+                       remainingAfterOneSecond(atFPS: 120), accuracy: 0.001)
+    }
+
+    /// An inverted or collapsed range turns the ramp back into a step.
+    func testTheMotionRangeCannotCollapse() {
+        var configuration = EyeGlowConfiguration()
+        configuration.stillnessThreshold = 0.9
+        configuration.motionThreshold = 0.1
+
+        let clean = configuration.sanitized
+
+        XCTAssertGreaterThan(clean.motionThreshold, clean.stillnessThreshold)
+        XCTAssertGreaterThan(clean.motion(forSpeed: 10), 0.9)
+    }
+
     // MARK: - Prediction
 
     /// The lag being fixed: Vision runs at a twelfth of the frame rate, so its
