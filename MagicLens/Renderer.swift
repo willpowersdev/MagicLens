@@ -34,6 +34,22 @@ struct Uniforms {
     var eyePresence: Float
 }
 
+/// Mirrors `TeethUniforms` in Shaders/FaceEffects.metal.
+///
+/// Kept out of `Uniforms` because only one effect reads it — the shared struct
+/// is already carrying enough for every shader that doesn't.
+struct TeethUniforms {
+    var minimumBrightness: Float
+    var maximumSaturation: Float
+    var brightnessSoftness: Float
+    var saturationSoftness: Float
+    var tintStrength: Float
+    var edgeFeather: Float
+    var mouthOpacity: Float
+    var mouthPointCount: Int32
+    var yellowColor: SIMD3<Float>
+}
+
 /// Draws a full screen quad textured with the latest camera frame and run
 /// through the selected effect. Until the first frame arrives it renders the
 /// gradient instead, so the app never shows an empty drawable.
@@ -217,6 +233,40 @@ final class Renderer: NSObject, MTKViewDelegate {
         startDate = Date()
     }
 
+    /// Binds the inner-lip contour and the teeth settings.
+    ///
+    /// The feather is scaled by the face rather than fixed, so the soft edge
+    /// stays proportionate whether someone is close to the camera or far away.
+    private func bindMouth(face: TrackedFace, to encoder: MTLRenderCommandEncoder) {
+
+        let settings = feed.faces.configuration
+
+        // setFragmentBytes rejects a zero length, and the shaders are guarded
+        // by the count regardless.
+        var mouth = face.mouth.isEmpty ? [SIMD2<Float>(0, 0)] : face.mouth
+
+        var teeth = TeethUniforms(
+            minimumBrightness: settings.minimumBrightness,
+            maximumSaturation: settings.maximumSaturation,
+            brightnessSoftness: settings.brightnessSoftness,
+            saturationSoftness: settings.saturationSoftness,
+            tintStrength: settings.tintStrength,
+            // Scaled by the mouth, not the face. Against the face the feather
+            // came out around ten times the height of the opening, so the mask
+            // never reached full strength anywhere and the tint was patchy.
+            edgeFeather: settings.edgeFeather * max(face.mouthHeight, 0.002),
+            mouthOpacity: face.mouthOpacity,
+            mouthPointCount: Int32(face.mouth.count),
+            yellowColor: settings.yellowColor)
+
+        encoder.setFragmentBytes(&mouth,
+                                 length: MemoryLayout<SIMD2<Float>>.stride * mouth.count,
+                                 index: 1)
+        encoder.setFragmentBytes(&teeth,
+                                 length: MemoryLayout<TeethUniforms>.stride,
+                                 index: 2)
+    }
+
     // MARK: - MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
@@ -273,6 +323,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.setRenderPipelineState(gradientPipelineState)
         }
 
+        // Bound for both draws and both branches. Only the teeth effect and the
+        // debug overlay read them, but leaving them unbound on the gradient path
+        // would hand the overlay whatever happened to be there.
+        bindMouth(face: face, to: encoder)
+
         encoder.drawIndexedPrimitives(type: .triangle,
                                       indexCount: Self.indexData.count,
                                       indexType: .uint32,
@@ -304,6 +359,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.setFragmentBytes(&overlayUniforms,
                                      length: MemoryLayout<Uniforms>.stride,
                                      index: 0)
+            bindMouth(face: face, to: encoder)
             encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: Self.indexData.count,
                                           indexType: .uint32,

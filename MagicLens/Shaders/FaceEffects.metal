@@ -77,6 +77,113 @@ fragment float4 fragment_facewarp(VertexOut interpolated [[stage_in]],
     return sampleVideo(video, warped, uniforms);
 }
 
+// MARK: - Teeth highlight
+
+/// Per-effect settings, mirrored by TeethUniforms in Renderer.swift.
+struct TeethUniforms {
+    float minimumBrightness;
+    float maximumSaturation;
+    float brightnessSoftness;
+    float saturationSoftness;
+    float tintStrength;
+    float edgeFeather;
+    float mouthOpacity;
+    int mouthPointCount;
+    float3 yellowColor;
+};
+
+/// Signed distance from `uv` to the mouth polygon: negative inside.
+///
+/// One measure does inside-or-out and the soft edge together, which also makes
+/// the feather a distance in uv rather than a second polygon.
+static float mouthDistance(float2 uv,
+                           constant float2 *points,
+                           int count) {
+
+    float closest = 1e6;
+    bool inside = false;
+
+    for (int i = 0, j = count - 1; i < count; j = i, i++) {
+        float2 a = points[i];
+        float2 b = points[j];
+
+        // Distance to this edge.
+        float2 edge = b - a;
+        float2 toPoint = uv - a;
+        float t = clamp(dot(toPoint, edge) / max(dot(edge, edge), 1e-9), 0.0, 1.0);
+        closest = min(closest, length(toPoint - edge * t));
+
+        // Crossing test, accumulated around the loop.
+        if ((a.y > uv.y) != (b.y > uv.y)) {
+            float crossing = a.x + (uv.y - a.y) / (b.y - a.y) * (b.x - a.x);
+            if (uv.x < crossing) {
+                inside = !inside;
+            }
+        }
+    }
+
+    return inside ? -closest : closest;
+}
+
+/// Monochrome everywhere, with likely teeth picked out in yellow.
+///
+/// A brightness-and-saturation heuristic confined to the gap between the lips —
+/// not tooth recognition. Anything bright and near-neutral inside that contour
+/// is tinted, which in practice can include a bright tongue, dental work and
+/// specular highlights on wet lips.
+fragment float4 fragment_teeth(VertexOut interpolated [[stage_in]],
+                               constant Uniforms &uniforms [[buffer(0)]],
+                               constant float2 *mouthPoints [[buffer(1)]],
+                               constant TeethUniforms &teeth [[buffer(2)]],
+                               texture2d<float> video [[texture(0)]]) {
+
+    float2 uv = interpolated.texCoord;
+    float3 colour = sampleVideo(video, uv, uniforms).rgb;
+
+    // Rec. 709 luma, and the base everything else is mixed against.
+    float luma = dot(colour, float3(0.2126, 0.7152, 0.0722));
+    float3 grey = float3(luma);
+
+    if (teeth.mouthPointCount < 3 || teeth.mouthOpacity <= 0.001) {
+        return float4(grey, 1.0);
+    }
+
+    float distance = mouthDistance(uv, mouthPoints, teeth.mouthPointCount);
+
+    // Outside by more than the feather: the overwhelming majority of the frame
+    // leaves here, having done one polygon test and no colour work.
+    if (distance > teeth.edgeFeather) {
+        return float4(grey, 1.0);
+    }
+
+    float mask = 1.0 - smoothstep(-teeth.edgeFeather, teeth.edgeFeather, distance);
+
+    // Brightness and saturation from the original colour, not the grey — the
+    // whole test depends on saturation, which grey has thrown away.
+    float high = max(colour.r, max(colour.g, colour.b));
+    float low = min(colour.r, min(colour.g, colour.b));
+    float brightness = high;
+    float saturation = high > 1e-4 ? (high - low) / high : 0.0;
+
+    float brightEnough = smoothstep(teeth.minimumBrightness,
+                                    teeth.minimumBrightness + teeth.brightnessSoftness,
+                                    brightness);
+
+    float neutralEnough = 1.0 - smoothstep(teeth.maximumSaturation,
+                                           teeth.maximumSaturation + teeth.saturationSoftness,
+                                           saturation);
+
+    float confidence = clamp(mask * brightEnough * neutralEnough, 0.0, 1.0);
+
+    // Tint the luminance rather than painting flat yellow, so the shading that
+    // makes teeth read as teeth survives.
+    float3 tinted = teeth.yellowColor * mix(0.55, 1.0, luma);
+
+    float amount = clamp(confidence * teeth.tintStrength * teeth.mouthOpacity, 0.0, 1.0);
+
+    return float4(mix(grey, tinted, amount), 1.0);
+}
+
 /// A cross centred on `point`, `arm` pixels across. Sized in pixels rather than
 /// uv so the two strokes come out the same length on both axes.
 static float eyeMarker(float2 uv, float2 point, constant Uniforms &uniforms, float arm) {
@@ -99,7 +206,9 @@ static float eyeMarker(float2 uv, float2 point, constant Uniforms &uniforms, flo
 /// coordinate maths could agree with the face while the effects disagreed, and
 /// prove nothing.
 fragment float4 fragment_facedebug(VertexOut interpolated [[stage_in]],
-                                   constant Uniforms &uniforms [[buffer(0)]]) {
+                                   constant Uniforms &uniforms [[buffer(0)]],
+                                   constant float2 *mouthPoints [[buffer(1)]],
+                                   constant TeethUniforms &teeth [[buffer(2)]]) {
 
     float2 uv = interpolated.texCoord;
     float4 result = float4(0.0);
@@ -148,5 +257,16 @@ fragment float4 fragment_facedebug(VertexOut interpolated [[stage_in]],
                      clamp(pupils, 0.0, 1.0) * uniforms.eyePresence);
     }
 
+    // The eroded inner lip contour, drawn from the same points the teeth
+    // shader tests against. Without this a mask in the wrong place is
+    // indistinguishable from teeth the heuristic simply failed to find.
+    if (teeth.mouthPointCount >= 3 && teeth.mouthOpacity > 0.001) {
+        float distance = abs(mouthDistance(uv, mouthPoints, teeth.mouthPointCount));
+        float onContour = 1.0 - smoothstep(0.0, 2.5 / max(uniforms.resolution.y, 1.0), distance);
+
+        result = mix(result, float4(1.0, 0.35, 0.8, 1.0), onContour * teeth.mouthOpacity);
+    }
+
     return result;
 }
+

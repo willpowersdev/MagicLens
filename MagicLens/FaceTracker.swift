@@ -34,6 +34,28 @@ struct TrackedFace: Equatable {
     /// while the other is good.
     var eyePresence: Float
 
+    /// The visible gap between the lips, already eroded, in uv space. Empty
+    /// when the mouth is shut or Vision hasn't found one.
+    var mouth: [SIMD2<Float>]
+
+    /// Rough size of the face, for scaling things measured against it.
+    var faceSpan: Float { max(size.x, size.y) }
+
+    /// Height of the mouth opening in uv, which is the small dimension and the
+    /// one anything drawn inside it has to be measured against.
+    var mouthHeight: Float {
+        guard mouth.count >= 3 else {
+            return 0
+        }
+        let ys = mouth.map(\.y)
+        let xs = mouth.map(\.x)
+        return min(ys.max()! - ys.min()!, xs.max()! - xs.min()!)
+    }
+
+    /// Fades the mouth effect rather than switching it, so a missed detection
+    /// or a moment of speech doesn't flash.
+    var mouthOpacity: Float
+
     static let none = TrackedFace(center: SIMD2(0.5, 0.5),
                                   size: SIMD2(0, 0),
                                   presence: 0,
@@ -41,7 +63,9 @@ struct TrackedFace: Equatable {
                                   rightEye: SIMD2(0.5, 0.5),
                                   leftPupil: SIMD2(0.5, 0.5),
                                   rightPupil: SIMD2(0.5, 0.5),
-                                  eyePresence: 0)
+                                  eyePresence: 0,
+                                  mouth: [],
+                                  mouthOpacity: 0)
 }
 
 /// Shared face tracking, published to every effect through the uniforms.
@@ -87,6 +111,8 @@ final class FaceTracker {
     private var lastLandmarks: CFAbsoluteTime = 0
     private var lastLandmarkAttempt: CFAbsoluteTime = 0
     private var visionInFlight = false
+    private var storedConfiguration = TeethHighlightConfiguration()
+    private var loggedMouth = false
 
     /// The current face, advanced to `now`. Called once per rendered frame.
     func face(at now: CFAbsoluteTime, elapsed: Float) -> TrackedFace {
@@ -120,6 +146,24 @@ final class FaceTracker {
         } else {
             tracked.eyePresence += (0 - tracked.eyePresence) * step
         }
+
+        // Time-based rather than per-frame, so the contour follows at the same
+        // speed whether the display is running at 60 or dropping frames.
+        let mouthFollow = 1 - exp(-storedConfiguration.landmarkResponsiveness * elapsed)
+
+        if let eyeTarget, !eyesStale, !eyeTarget.mouth.isEmpty,
+           tracked.mouth.count == eyeTarget.mouth.count {
+            for index in tracked.mouth.indices {
+                tracked.mouth[index] += (eyeTarget.mouth[index] - tracked.mouth[index]) * mouthFollow
+            }
+            tracked.mouthOpacity += (1 - tracked.mouthOpacity) * step
+        } else {
+            // Fades in roughly 150 ms — quick enough that a closed mouth or a
+            // lost face doesn't leave the tint hanging.
+            tracked.mouthOpacity += (0 - tracked.mouthOpacity) * min(1, elapsed / 0.15)
+        }
+
+        tracked.mouthOpacity = min(1, max(0, tracked.mouthOpacity))
 
         tracked.presence = min(1, max(0, tracked.presence))
         tracked.eyePresence = min(1, max(0, tracked.eyePresence))
@@ -265,6 +309,58 @@ final class FaceTracker {
             return
         }
 
+        // Every point of the inner lip contour, rather than its centre.
+        func polygon(_ region: VNFaceLandmarkRegion2D?) -> [SIMD2<Float>] {
+            guard let region, region.pointCount >= 3 else {
+                return []
+            }
+
+            return region.normalizedPoints.map { point in
+                let inImage = CGPoint(x: box.origin.x + point.x * box.width,
+                                      y: box.origin.y + point.y * box.height)
+                let inBuffer = CGPoint(x: inImage.x, y: 1 - inImage.y)
+                let mapped = Self.uvPoint(fromBuffer: inBuffer,
+                                          rotated: bufferIsLandscape,
+                                          mirrored: mirrored)
+                return SIMD2(Float(mapped.x), Float(mapped.y))
+            }
+        }
+
+        let faceBox = Self.uvRect(fromBuffer: CGRect(x: box.minX,
+                                                     y: 1 - box.maxY,
+                                                     width: box.width,
+                                                     height: box.height),
+                                  rotated: bufferIsLandscape,
+                                  mirrored: mirrored)
+        let faceExtent = SIMD2(Float(faceBox.width), Float(faceBox.height))
+
+        let rawMouth = polygon(landmarks.innerLips)
+
+        // TEMPORARY diagnostic. The rendering half is proven by
+        // TeethRenderTests; what can't be tested off-device is whether Vision
+        // returns a usable innerLips contour for a face lying on its side,
+        // which is how the buffer reaches it.
+        if !loggedMouth {
+            loggedMouth = true
+            let ratio = MouthGeometry.area(of: rawMouth)
+                / max(faceExtent.x * faceExtent.y, 1e-6)
+            print("[MagicLens] innerLips points: \(landmarks.innerLips?.pointCount ?? -1), "
+                  + "area ratio: \(ratio), threshold: \(configuration.minimumMouthArea)")
+            if let first = rawMouth.first {
+                print("[MagicLens] first mouth uv: \(first), face extent: \(faceExtent)")
+            }
+        }
+
+        // A shut mouth still yields a contour — a sliver a couple of pixels
+        // high. Left alone it reads as a bright line and gets tinted.
+        let mouthOpen = MouthGeometry.isOpen(rawMouth,
+                                             faceSize: faceExtent,
+                                             minimumArea: configuration.minimumMouthArea)
+
+        let mouth = mouthOpen
+            ? MouthGeometry.eroded(rawMouth, by: configuration.polygonErosion)
+            : []
+
         // Pupils are a single point each, and are the first thing Vision drops
         // when the eyes are narrowed or turned away — fall back to the eye
         // centre so an effect anchored to them doesn't jump to the origin.
@@ -288,9 +384,24 @@ final class FaceTracker {
             tracked.rightPupil = rightPupil
         }
 
+        found.mouth = mouth
+
+        // Vertex-wise smoothing only makes sense when the contours correspond.
+        // A different point count means Vision found a different shape, so take
+        // it as it is rather than easing between unrelated vertices.
+        if tracked.mouth.count != mouth.count {
+            tracked.mouth = mouth
+        }
+
         eyeTarget = found
         lastLandmarks = CFAbsoluteTimeGetCurrent()
         lock.unlock()
+    }
+
+    /// Tuning, read on the Vision queue and settable from anywhere.
+    var configuration: TeethHighlightConfiguration {
+        get { lock.withLock { storedConfiguration } }
+        set { lock.withLock { storedConfiguration = newValue.sanitized } }
     }
 
     /// Maps a metadata bounding box into the shaders' uv space.
