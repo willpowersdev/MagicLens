@@ -25,6 +25,15 @@ struct MouthMask {
     /// which is what the open/closed test is made of.
     let coverage: Float
 
+    /// A high percentile of the brightness inside the mask — what the brightest
+    /// thing in this particular mouth is, on this frame.
+    ///
+    /// The tint threshold is set from this rather than fixed. Teeth sit in a
+    /// cavity the lips shade, so their absolute brightness tracks the light in
+    /// the room more than it tracks being teeth; within one mouth they are
+    /// reliably the brightest thing in it.
+    let brightnessPeak: Float
+
     /// When it was produced, on the host clock. Masks go stale quickly; a head
     /// turn invalidates one while the face is still perfectly well tracked.
     let time: CFAbsoluteTime
@@ -201,13 +210,27 @@ final class FaceParsing {
         }
 
         let settings = configuration
-        let region = Self.cropRegion(around: faceBox, padding: settings.maskCropPadding)
+
+        let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
+        let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+
+        guard bufferWidth > 0, bufferHeight > 0 else {
+            return
+        }
+
+        let region = Self.cropRegion(around: faceBox,
+                                     padding: settings.maskCropPadding,
+                                     aspect: bufferWidth / bufferHeight)
 
         guard let input = crop(pixelBuffer, to: region),
               let output = predict(model, image: input),
               let coverage = classify(output) else {
             return
         }
+
+        // Measured against the hard mask, before the feather spreads it out
+        // over the lips.
+        let peak = peakBrightness(in: input)
 
         feather(radius: Int(settings.maskFeather.rounded()))
 
@@ -225,6 +248,7 @@ final class FaceParsing {
         let produced = MouthMask(texture: texture,
                                  region: region,
                                  coverage: coverage,
+                                 brightnessPeak: peak,
                                  time: CFAbsoluteTimeGetCurrent())
 
         lock.lock()
@@ -279,21 +303,28 @@ final class FaceParsing {
     /// Padding also buys slack for the box lagging a moving head, which matters
     /// more: a mouth that slides out of the crop vanishes from the mask
     /// entirely.
-    static func cropRegion(around faceBox: CGRect, padding: Float) -> CGRect {
+    /// `aspect` is the buffer's width over its height, in pixels.
+    static func cropRegion(around faceBox: CGRect, padding: Float, aspect: CGFloat) -> CGRect {
 
         let grow = CGFloat(padding)
         let padded = faceBox.insetBy(dx: -faceBox.width * grow,
                                      dy: -faceBox.height * grow)
 
-        // Square, so the 512×512 input doesn't stretch the face along one axis.
-        // Taken from the longer side, so nothing inside the padded box is lost.
-        let side = max(padded.width, padded.height)
+        // Square in pixels, so the 512×512 input doesn't stretch the face along
+        // one axis. Equal *normalised* sides would not do it — the buffer is
+        // 16:9, so that is a rectangle nearly twice as wide as it is tall on the
+        // sensor, and the face would reach the model squashed.
+        //
+        // Worked in units of the buffer's height, and taken from the longer
+        // side, so nothing inside the padded box is lost.
+        let side = max(padded.width * aspect, padded.height)
+        let size = CGSize(width: side / aspect, height: side)
         let centre = CGPoint(x: padded.midX, y: padded.midY)
 
-        return CGRect(x: centre.x - side / 2,
-                      y: centre.y - side / 2,
-                      width: side,
-                      height: side)
+        return CGRect(x: centre.x - size.width / 2,
+                      y: centre.y - size.height / 2,
+                      width: size.width,
+                      height: size.height)
     }
 
     /// Renders `region` of the frame into the 512×512 buffer the model takes.
@@ -378,6 +409,59 @@ final class FaceParsing {
         }
 
         return Float(mouthPixels) / Float(count)
+    }
+
+    /// The ninetieth percentile of brightness inside the mask — high enough to
+    /// be a lit tooth where there is one, low enough not to be a single
+    /// specular highlight on a wet lip.
+    ///
+    /// Reads the crop the model was given, which is the same 512 square the
+    /// mask came back as, so the two line up pixel for pixel with no resampling.
+    /// Returns 1 when there is nothing to measure, which leaves the threshold at
+    /// its ceiling and tints nothing.
+    private func peakBrightness(in buffer: CVPixelBuffer) -> Float {
+
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else {
+            return 1
+        }
+
+        let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+
+        // Binned rather than sorted: a quarter of a million samples, fifteen
+        // times a second, and the percentile only has to be about right.
+        var histogram = [Int](repeating: 0, count: 64)
+        var total = 0
+
+        classified.withUnsafeBufferPointer { mask in
+            for row in 0..<Self.inputSize {
+                let line = bytes + row * rowBytes
+                for column in 0..<Self.inputSize
+                where mask[row * Self.inputSize + column] != 0 {
+                    let pixel = line + column * 4
+                    let high = max(pixel[0], max(pixel[1], pixel[2]))   // BGRA
+                    histogram[Int(high) >> 2] += 1
+                    total += 1
+                }
+            }
+        }
+
+        guard total > 0 else {
+            return 1
+        }
+
+        var running = 0
+        for (bin, count) in histogram.enumerated() {
+            running += count
+            if running >= total * 9 / 10 {
+                return (Float(bin) + 0.5) / 64
+            }
+        }
+
+        return 1
     }
 
     /// Softens the mask edge.

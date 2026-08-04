@@ -94,6 +94,32 @@ struct TeethHighlightConfiguration: Sendable, Equatable {
     /// because a head turn invalidates a mask while the box is still good.
     var maskGraceSeconds: Float = 0.4
 
+    // The brightness and saturation thresholds are separate from the contour's
+    // because the region is: the mask is the mouth opening, the contour is a
+    // line round the lips shrunk inwards in the hope of clearing them. Inside
+    // the opening the only things to tell apart are teeth, tongue, gums and the
+    // dark gap, which is a far easier test than one that still has to reject
+    // lip.
+
+    /// Fraction of the mouth's own peak brightness a pixel must reach.
+    ///
+    /// Relative rather than fixed because a mouth is a cavity the lips shade:
+    /// how bright teeth are in absolute terms says more about the light in the
+    /// room than about whether they are teeth. Measured on eight colour faces,
+    /// a fixed 0.52 tinted nothing on three of them whose teeth are plainly
+    /// visible — all three shadowed rather than dim.
+    var maskBrightnessFraction: Float = 0.60
+
+    /// Floor under that fraction. Without it, a mouth with no teeth in it at
+    /// all has its threshold collapse onto the tongue, and the tongue is then
+    /// the brightest thing inside the mask.
+    var maskMinimumBrightness: Float = 0.25
+
+    /// Looser than the contour's, since lips are no longer inside the region to
+    /// be rejected. Set between what teeth reach under warm light — measured up
+    /// to about 0.30 — and where tongue and gums start, around 0.45.
+    var maskMaximumSaturation: Float = 0.38
+
     /// Everything forced into a usable range, so a bad value degrades rather
     /// than producing an inverted or never-satisfied test.
     var sanitized: TeethHighlightConfiguration {
@@ -116,6 +142,9 @@ struct TeethHighlightConfiguration: Sendable, Equatable {
         copy.minimumMaskCoverage = max(0, min(minimumMaskCoverage, 1))
         copy.maskUpdatesPerSecond = max(1, min(maskUpdatesPerSecond, 60))
         copy.maskGraceSeconds = max(0.05, min(maskGraceSeconds, 5))
+        copy.maskBrightnessFraction = maskBrightnessFraction.clamped(to: 0...1)
+        copy.maskMinimumBrightness = maskMinimumBrightness.clamped(to: 0...1)
+        copy.maskMaximumSaturation = maskMaximumSaturation.clamped(to: 0...1)
 
         return copy
     }

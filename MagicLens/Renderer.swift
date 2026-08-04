@@ -311,6 +311,33 @@ final class Renderer: NSObject, MTKViewDelegate {
         startDate = Date()
     }
 
+    /// What counts as bright and neutral enough to tint, given where the mouth
+    /// came from.
+    ///
+    /// The two sources want different tests. The contour is a line around the
+    /// lips pulled inwards, so lip is still inside it and the thresholds have to
+    /// be strict enough to reject it. The mask is the opening itself, so the
+    /// only things left to tell apart are teeth, tongue, gums and the dark gap —
+    /// and the brightness bar can be measured against what is in this mouth
+    /// rather than fixed.
+    ///
+    /// That last part is the point. Measured on eight colour faces, a fixed
+    /// 0.52 tinted nothing at all on three whose teeth are plainly visible,
+    /// because a mouth is a cavity and the lips shade what is inside it. The
+    /// floor keeps a mouth with no teeth in it from having the threshold
+    /// collapse onto its tongue.
+    static func tintThresholds(_ settings: TeethHighlightConfiguration,
+                               maskPeak: Float?) -> (brightness: Float, saturation: Float) {
+
+        guard let maskPeak else {
+            return (settings.minimumBrightness, settings.maximumSaturation)
+        }
+
+        return (max(settings.maskMinimumBrightness,
+                    maskPeak * settings.maskBrightnessFraction),
+                settings.maskMaximumSaturation)
+    }
+
     /// Stands in for the mask when there isn't one, so the fragment shader's
     /// texture binding is never empty. Reading it would give zero coverage
     /// everywhere; `usesMask` means nothing reads it.
@@ -360,9 +387,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         // videoTexCoord — the same mapping it samples the video with.
         let region = mask?.mask.region ?? .zero
 
+        let thresholds = Self.tintThresholds(settings, maskPeak: mask?.mask.brightnessPeak)
+
         var teeth = TeethUniforms(
-            minimumBrightness: settings.minimumBrightness,
-            maximumSaturation: settings.maximumSaturation,
+            minimumBrightness: thresholds.brightness,
+            maximumSaturation: thresholds.saturation,
             brightnessSoftness: settings.brightnessSoftness,
             saturationSoftness: settings.saturationSoftness,
             tintStrength: settings.tintStrength,

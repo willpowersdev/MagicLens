@@ -401,7 +401,7 @@ final class TeethRenderTests: XCTestCase {
                                           rotated: rotated,
                                           mirrored: mirrored,
                                           viewSize: viewSize,
-                                          mask: (mask, region))
+                                          mask: (mask, region, 1.0))
 
             let contour = Self.tinted(in: viaContour)
             let segmented = Self.tinted(in: viaMask)
@@ -505,26 +505,68 @@ final class TeethRenderTests: XCTestCase {
         XCTAssertEqual(centre.y, teeth.y, accuracy: 0.05, "the mask is not over the mouth")
     }
 
-    /// The crop handed to the model has to be square, centred on the face and
-    /// bigger than it — see FaceParsing.cropRegion for why each of those.
-    func testCropRegionIsASquarePaddedAroundTheFace() {
+    /// The crop handed to the model has to be square *in pixels*, centred on the
+    /// face and bigger than it — see FaceParsing.cropRegion for why each.
+    ///
+    /// Pixels rather than normalised units is the whole point: the camera
+    /// delivers 16:9, so a rect with equal normalised sides reaches the model as
+    /// a face squashed to a little over half its width.
+    func testCropRegionIsSquareInPixelsAroundTheFace() {
 
         let face = CGRect(x: 0.3, y: 0.2, width: 0.2, height: 0.4)
-        let crop = FaceParsing.cropRegion(around: face, padding: 0.25)
 
-        XCTAssertEqual(crop.width, crop.height, accuracy: 1e-6, "not square")
-        XCTAssertEqual(crop.midX, face.midX, accuracy: 1e-6, "moved off the face horizontally")
-        XCTAssertEqual(crop.midY, face.midY, accuracy: 1e-6, "moved off the face vertically")
+        for (width, height) in [(1920.0, 1080.0), (1080.0, 1920.0), (512.0, 512.0)] {
+            let aspect = CGFloat(width / height)
+            let crop = FaceParsing.cropRegion(around: face, padding: 0.25, aspect: aspect)
 
-        // Taken from the longer side once padded, so nothing inside the padded
-        // box is cut off by the squaring.
-        XCTAssertEqual(crop.width, face.height * 1.5, accuracy: 1e-6)
-        XCTAssertTrue(crop.contains(face), "the crop lost part of the face")
+            let label = "\(Int(width))×\(Int(height))"
 
-        // Zero padding still squares up, and still can't lose the face.
-        let tight = FaceParsing.cropRegion(around: face, padding: 0)
-        XCTAssertEqual(tight.width, tight.height, accuracy: 1e-6)
-        XCTAssertTrue(tight.contains(face))
+            XCTAssertEqual(crop.width * CGFloat(width), crop.height * CGFloat(height),
+                           accuracy: 1e-6, "not square in pixels — \(label)")
+            XCTAssertEqual(crop.midX, face.midX, accuracy: 1e-6, "moved off the face — \(label)")
+            XCTAssertEqual(crop.midY, face.midY, accuracy: 1e-6, "moved off the face — \(label)")
+            XCTAssertTrue(crop.contains(face), "the crop lost part of the face — \(label)")
+
+            // Zero padding still squares up, and still can't lose the face.
+            let tight = FaceParsing.cropRegion(around: face, padding: 0, aspect: aspect)
+            XCTAssertEqual(tight.width * CGFloat(width), tight.height * CGFloat(height),
+                           accuracy: 1e-6, label)
+            XCTAssertTrue(tight.contains(face), label)
+        }
+    }
+
+    /// The threshold that decides what gets tinted, which is where the effect
+    /// was failing: it tinted nothing on a face whose teeth were plainly
+    /// visible, because a mouth is a cavity and the lips shade what is inside
+    /// it.
+    func testTintThresholdFollowsTheMouthRatherThanTheRoom() {
+
+        let settings = TeethHighlightConfiguration()
+
+        // No mask: the contour's own thresholds, unchanged, because the contour
+        // still has lip inside it to reject.
+        let contour = Renderer.tintThresholds(settings, maskPeak: nil)
+        XCTAssertEqual(contour.brightness, settings.minimumBrightness, accuracy: 1e-6)
+        XCTAssertEqual(contour.saturation, settings.maximumSaturation, accuracy: 1e-6)
+
+        // A brightly lit mouth: the bar rises with it, so a bright tongue next
+        // to brighter teeth is still rejected.
+        let bright = Renderer.tintThresholds(settings, maskPeak: 0.95)
+        XCTAssertEqual(bright.brightness, 0.95 * settings.maskBrightnessFraction, accuracy: 1e-6)
+
+        // A shadowed mouth: measured at 0.469 on one of the sample faces, where
+        // the old fixed 0.52 tinted nothing at all. The bar has to come down
+        // below the teeth that are actually there.
+        let shadowed = Renderer.tintThresholds(settings, maskPeak: 0.469)
+        XCTAssertLessThan(shadowed.brightness, 0.469,
+                          "the threshold is above the brightest thing in the mouth")
+        XCTAssertLessThan(shadowed.brightness, settings.minimumBrightness,
+                          "a shadowed mouth is no better off than before")
+
+        // A mouth with no teeth in it: the floor holds, so the threshold cannot
+        // collapse onto the tongue.
+        let dark = Renderer.tintThresholds(settings, maskPeak: 0.1)
+        XCTAssertEqual(dark.brightness, settings.maskMinimumBrightness, accuracy: 1e-6)
     }
 
     /// Where the tint landed, as a count and a centre in uv.
@@ -771,7 +813,7 @@ final class TeethRenderTests: XCTestCase {
                                mirrored: Bool,
                                letterboxed: Bool = false,
                                viewSize: CGSize? = nil,
-                               mask: (texture: MTLTexture, region: CGRect)? = nil) throws -> Rendered {
+                               mask: (texture: MTLTexture, region: CGRect, peak: Float)? = nil) throws -> Rendered {
 
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let queue = try XCTUnwrap(device.makeCommandQueue())
@@ -845,9 +887,13 @@ final class TeethRenderTests: XCTestCase {
             rotated: rotated,
             letterboxed: letterboxed)
         var points = mouth.map { Renderer.videoPointToView($0, scale: scale) }
+        // Through the renderer's own rule, so the harness can't quietly
+        // diverge from what the app does.
+        let thresholds = Renderer.tintThresholds(configuration, maskPeak: mask?.peak)
+
         var teeth = TeethUniforms(
-            minimumBrightness: configuration.minimumBrightness,
-            maximumSaturation: configuration.maximumSaturation,
+            minimumBrightness: thresholds.brightness,
+            maximumSaturation: thresholds.saturation,
             brightnessSoftness: configuration.brightnessSoftness,
             saturationSoftness: configuration.saturationSoftness,
             tintStrength: configuration.tintStrength,
