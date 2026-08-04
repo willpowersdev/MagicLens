@@ -96,11 +96,8 @@ struct CameraView: View {
                         isShowingPicker = true
                     }
                 } label: {
-                    // Drawn rather than an image, so it stays crisp at any scale
-                    // and matches the fill of the buttons beside it.
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.black.opacity(0.8))
-                        .frame(width: 56, height: 56)
+                    Image(systemName: "camera.filters")
+                        .controlIcon()
                 }
                 .accessibilityLabel("Choose effect")
 
@@ -109,11 +106,8 @@ struct CameraView: View {
                 Button {
                     controller.flipCamera()
                 } label: {
-                    Image("rotate_camera_icon")
-                        .resizable()
-                        .frame(width: 34, height: 34)
-                        .padding(8)
-                        .background(.black.opacity(0.8), in: .circle)
+                    Image(systemName: "camera.rotate")
+                        .controlIcon()
                 }
                 .accessibilityLabel("Switch camera")
             }
@@ -180,11 +174,7 @@ struct CameraView: View {
             }
         } label: {
             Image(systemName: showsFaceOverlay ? "viewfinder.circle.fill" : "viewfinder")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(showsFaceOverlay ? Color.green : Color.white)
-                .frame(width: 34, height: 34)
-                .padding(8)
-                .background(.black.opacity(0.8), in: .circle)
+                .controlIcon(tint: showsFaceOverlay ? .green : .white)
         }
         .accessibilityLabel("Face tracking overlay")
         .opacity(controller.isRecording ? 0 : 1)
@@ -200,15 +190,44 @@ struct CameraView: View {
             }
         } label: {
             Image(systemName: "square.grid.2x2")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 34, height: 34)
-                .padding(8)
-                .background(.black.opacity(0.8), in: .circle)
+                .controlIcon()
         }
         .accessibilityLabel("Recordings")
         .opacity(controller.isRecording ? 0 : 1)
         .disabled(controller.isRecording)
+    }
+}
+
+/// The chrome every control shares.
+///
+/// Liquid Glass where the system has it, in its clear mode so the camera reads
+/// through the button rather than being covered by it. Below iOS 26 there is no
+/// equivalent, so those fall back to the solid disc these buttons used before.
+private struct ControlChrome: ViewModifier {
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.clear, in: .circle)
+        } else {
+            content.background(.black.opacity(0.8), in: .circle)
+        }
+    }
+}
+
+private extension View {
+
+    func controlChrome() -> some View {
+        modifier(ControlChrome())
+    }
+
+    /// A symbol sized and padded to the shared control shape.
+    func controlIcon(tint: Color = .white) -> some View {
+        self.font(.system(size: 20, weight: .medium))
+            .foregroundStyle(tint)
+            .frame(width: 34, height: 34)
+            .padding(8)
+            .controlChrome()
     }
 }
 
