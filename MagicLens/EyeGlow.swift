@@ -115,15 +115,17 @@ enum EyeGlowDebugTexture: UInt32, Sendable, Equatable {
 /// GPU or a camera to check.
 struct EyeGlowConfiguration: Sendable, Equatable {
 
-    /// Periwinkle rather than cyan: the centre of the eye burns out to white on
-    /// its own — see the whitening in `eyeGlowFragment` — so this is the colour
-    /// of the falloff and the bloom around it, not of the core.
-    var glowColor = SIMD3<Float>(0.55, 0.52, 1.0)
+    /// The centre of the eye burns out to white on its own — see the whitening
+    /// in `eyeGlowFragment` — so this is the colour of the falloff and of the
+    /// bloom around it, not of the core. A green that leans slightly cyan reads
+    /// more clearly against skin than a pure one, which muddies where it meets
+    /// the face.
+    var glowColor = SIMD3<Float>(0.35, 1.0, 0.45)
 
-    var eyeIntensity: Float = 4.5
-    var coreContribution: Float = 1.0
-    var bloomContribution: Float = 1.0
-    var trailContribution: Float = 0.70
+    var eyeIntensity: Float = 7.12
+    var coreContribution: Float = 1.76
+    var bloomContribution: Float = 4.0
+    var trailContribution: Float = 0.68
 
     /// Blur radii for the three bloom scales, in pixels at each one's own size.
     var bloomSigmaSmall: Float = 4.0
@@ -132,7 +134,9 @@ struct EyeGlowConfiguration: Sendable, Equatable {
 
     /// How much of the previous trail survives one frame *at 60fps*. The actual
     /// per-frame figure is derived from elapsed time — see `decay(forElapsed:)`.
-    var trailDecayAt60FPS: Float = 0.92
+    /// The panel shows this as the time it takes to fade to half brightness,
+    /// which for this figure is a tenth of a second.
+    var trailDecayAt60FPS: Float = 0.805
     var trailInputContribution: Float = 0.75
     var trailBlurSigma: Float = 2.0
 
@@ -177,7 +181,7 @@ struct EyeGlowConfiguration: Sendable, Equatable {
     var minimumEyeOpenness: Float = 0.08
     var fullEyeOpenness: Float = 0.28
 
-    var maximumTrailLengthUV: Float = 0.08
+    var maximumTrailLengthUV: Float = 0.15
     var velocityTrailScale: Float = 2.5
 
     var quality = EyeGlowQuality.high
