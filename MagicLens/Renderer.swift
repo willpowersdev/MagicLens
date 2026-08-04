@@ -335,15 +335,33 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// floor keeps a mouth with no teeth in it from having the threshold
     /// collapse onto its tongue.
     static func tintThresholds(_ settings: TeethHighlightConfiguration,
-                               maskPeak: Float?) -> (brightness: Float, saturation: Float) {
+                               maskPeak: Float?,
+                               toothSaturation: Float? = nil) -> (brightness: Float, saturation: Float) {
 
         guard let maskPeak else {
             return (settings.minimumBrightness, settings.maximumSaturation)
         }
 
-        return (max(settings.maskMinimumBrightness,
-                    maskPeak * settings.maskBrightnessFraction),
-                settings.maskMaximumSaturation)
+        let brightness = max(settings.maskMinimumBrightness,
+                             maskPeak * settings.maskBrightnessFraction)
+
+        // Measured from this mouth where there is a measurement, and the fixed
+        // figure only as a floor.
+        //
+        // A tooth's saturation is not a constant: it depends on the camera's
+        // white balance and on how much light reaches a cavity, so one ceiling
+        // for every frame either lets gums through under warm light or rejects
+        // shaded teeth under cold. The headroom is what carries the teeth the
+        // measurement didn't reach — the ones at the corners, in the lips'
+        // shadow, which pick up a little red from what surrounds them and are
+        // exactly the ones that were being left untinted.
+        guard let toothSaturation else {
+            return (brightness, settings.maskMaximumSaturation)
+        }
+
+        return (brightness,
+                max(settings.maskMaximumSaturation,
+                    toothSaturation + settings.maskSaturationHeadroom))
     }
 
     /// Stands in for the mask when there isn't one, so the fragment shader's
@@ -526,7 +544,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         // videoTexCoord — the same mapping it samples the video with.
         let region = mask?.mask.region ?? .zero
 
-        let thresholds = Self.tintThresholds(settings, maskPeak: mask?.mask.brightnessPeak)
+        let thresholds = Self.tintThresholds(settings,
+                                             maskPeak: mask?.mask.brightnessPeak,
+                                             toothSaturation: mask?.mask.toothSaturation)
 
         var teeth = TeethUniforms(
             minimumBrightness: thresholds.brightness,

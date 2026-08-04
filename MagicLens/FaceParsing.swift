@@ -25,6 +25,16 @@ struct MouthMask {
     /// which is what the open/closed test is made of.
     let coverage: Float
 
+    /// How red the bright part of this mouth is.
+    ///
+    /// Inside the opening, teeth are the neutral thing and the tongue and gums
+    /// are the red one — but how red they read depends on the camera's white
+    /// balance and on how much light is reaching a cavity, so a fixed ceiling
+    /// either lets gums through in warm light or rejects shaded teeth in cold.
+    /// Measured among the brightest pixels, which are the teeth where there are
+    /// any, this says what a tooth's saturation actually is on this frame.
+    let toothSaturation: Float
+
     /// A high percentile of the brightness inside the mask — what the brightest
     /// thing in this particular mouth is, on this frame.
     ///
@@ -230,7 +240,7 @@ final class FaceParsing {
 
         // Measured against the hard mask, before the feather spreads it out
         // over the lips.
-        let peak = peakBrightness(in: input)
+        let statistics = mouthStatistics(in: input)
 
         feather(radius: Int(settings.maskFeather.rounded()))
 
@@ -248,7 +258,8 @@ final class FaceParsing {
         let produced = MouthMask(texture: texture,
                                  region: region,
                                  coverage: coverage,
-                                 brightnessPeak: peak,
+                                 toothSaturation: statistics.saturation,
+                                 brightnessPeak: statistics.peak,
                                  time: CFAbsoluteTimeGetCurrent())
 
         lock.lock()
@@ -419,21 +430,21 @@ final class FaceParsing {
     /// mask came back as, so the two line up pixel for pixel with no resampling.
     /// Returns 1 when there is nothing to measure, which leaves the threshold at
     /// its ceiling and tints nothing.
-    private func peakBrightness(in buffer: CVPixelBuffer) -> Float {
+    private func mouthStatistics(in buffer: CVPixelBuffer) -> (peak: Float, saturation: Float) {
 
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
 
         guard let base = CVPixelBufferGetBaseAddress(buffer) else {
-            return 1
+            return (1, 0)
         }
 
         let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
         let bytes = base.assumingMemoryBound(to: UInt8.self)
 
         // Binned rather than sorted: a quarter of a million samples, fifteen
-        // times a second, and the percentile only has to be about right.
-        var histogram = [Int](repeating: 0, count: 64)
+        // times a second, and the percentiles only have to be about right.
+        var brightness = [Int](repeating: 0, count: 64)
         var total = 0
 
         classified.withUnsafeBufferPointer { mask in
@@ -443,25 +454,72 @@ final class FaceParsing {
                 where mask[row * Self.inputSize + column] != 0 {
                     let pixel = line + column * 4
                     let high = max(pixel[0], max(pixel[1], pixel[2]))   // BGRA
-                    histogram[Int(high) >> 2] += 1
+                    brightness[Int(high) >> 2] += 1
                     total += 1
                 }
             }
         }
 
         guard total > 0 else {
-            return 1
+            return (1, 0)
+        }
+
+        let peak = Self.percentile(brightness, of: total, at: 9, over: 10) ?? 1
+
+        // Second pass, over the bright half of the mouth only. Those are the
+        // teeth where there are any, so their saturation is what the ceiling
+        // should be set from — rather than the mouth's saturation as a whole,
+        // which the tongue dominates.
+        let bright = UInt8(min(255, Int(peak * 255 * 0.75)))
+        var saturation = [Int](repeating: 0, count: 64)
+        var counted = 0
+
+        classified.withUnsafeBufferPointer { mask in
+            for row in 0..<Self.inputSize {
+                let line = bytes + row * rowBytes
+                for column in 0..<Self.inputSize
+                where mask[row * Self.inputSize + column] != 0 {
+                    let pixel = line + column * 4
+                    let high = max(pixel[0], max(pixel[1], pixel[2]))
+
+                    guard high >= bright else {
+                        continue
+                    }
+
+                    let low = min(pixel[0], min(pixel[1], pixel[2]))
+                    let value = Int(high) > 0 ? (Int(high) - Int(low)) * 255 / Int(high) : 0
+
+                    saturation[value >> 2] += 1
+                    counted += 1
+                }
+            }
+        }
+
+        // Three quarters rather than the top: a wet tooth catches a little of
+        // the lip's colour at its edge, and cutting at the peak would reject
+        // the tooth it was measured from.
+        let tooth = Self.percentile(saturation, of: counted, at: 3, over: 4) ?? 0
+
+        return (peak, tooth)
+    }
+
+    /// Where the given fraction of a binned distribution falls, as 0-1.
+    static func percentile(_ histogram: [Int], of total: Int,
+                           at numerator: Int, over denominator: Int) -> Float? {
+
+        guard total > 0, denominator > 0, !histogram.isEmpty else {
+            return nil
         }
 
         var running = 0
         for (bin, count) in histogram.enumerated() {
             running += count
-            if running >= total * 9 / 10 {
-                return (Float(bin) + 0.5) / 64
+            if running >= total * numerator / denominator {
+                return (Float(bin) + 0.5) / Float(histogram.count)
             }
         }
 
-        return 1
+        return nil
     }
 
     /// Softens the mask edge.

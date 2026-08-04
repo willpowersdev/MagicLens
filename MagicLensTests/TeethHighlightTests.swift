@@ -998,3 +998,90 @@ final class CoordinateRoundTripTests: XCTestCase {
                        "a face on one side of the buffer must appear on the other side of the view")
     }
 }
+
+/// Setting the tint thresholds from what the mouth actually looks like, rather
+/// than from constants.
+final class MeasuredTintThresholdTests: XCTestCase {
+
+    /// Without the model there is nothing measured, so the fixed figures stand.
+    func testTheContourFallbackUsesTheFixedFigures() {
+        let settings = TeethHighlightConfiguration()
+        let thresholds = Renderer.tintThresholds(settings, maskPeak: nil)
+
+        XCTAssertEqual(thresholds.brightness, settings.minimumBrightness)
+        XCTAssertEqual(thresholds.saturation, settings.maximumSaturation)
+    }
+
+    /// The failure this addresses: teeth at the corners sit in the lips' shadow
+    /// and pick up a little of their colour, so a ceiling set for a lit front
+    /// tooth rejects them and the tint comes out patchy.
+    func testARedderMouthRaisesTheCeilingToMatch() {
+        let settings = TeethHighlightConfiguration()
+
+        let neutral = Renderer.tintThresholds(settings, maskPeak: 0.8, toothSaturation: 0.10)
+        let warm = Renderer.tintThresholds(settings, maskPeak: 0.8, toothSaturation: 0.45)
+
+        XCTAssertGreaterThan(warm.saturation, neutral.saturation,
+                             "a warmer mouth should not be held to a cooler one's ceiling")
+        XCTAssertEqual(warm.saturation,
+                       0.45 + settings.maskSaturationHeadroom,
+                       accuracy: 1e-5)
+    }
+
+    /// The measurement may only ever raise the ceiling. A mouth measured as
+    /// very neutral must not tighten it to the point of tinting nothing —
+    /// which is the failure mode a purely relative threshold would have.
+    func testAVeryNeutralMouthDoesNotTightenTheCeiling() {
+        let settings = TeethHighlightConfiguration()
+
+        let thresholds = Renderer.tintThresholds(settings, maskPeak: 0.8, toothSaturation: 0)
+
+        XCTAssertEqual(thresholds.saturation, settings.maskMaximumSaturation, accuracy: 1e-6)
+    }
+
+    func testTheBrightnessThresholdStillFollowsThePeak() {
+        let settings = TeethHighlightConfiguration()
+
+        let dim = Renderer.tintThresholds(settings, maskPeak: 0.4, toothSaturation: 0.2)
+        let bright = Renderer.tintThresholds(settings, maskPeak: 0.95, toothSaturation: 0.2)
+
+        XCTAssertLessThan(dim.brightness, bright.brightness)
+        XCTAssertGreaterThanOrEqual(dim.brightness, settings.maskMinimumBrightness)
+    }
+
+    func testHeadroomSurvivesSanitising() {
+        var settings = TeethHighlightConfiguration()
+        settings.maskSaturationHeadroom = 5
+
+        XCTAssertLessThanOrEqual(settings.sanitized.maskSaturationHeadroom, 1)
+        XCTAssertEqual(TeethHighlightConfiguration().sanitized,
+                       TeethHighlightConfiguration())
+    }
+
+    // MARK: - The percentile the measurement is built on
+
+    func testAPercentileOfAFlatDistribution() {
+        let flat = [Int](repeating: 10, count: 64)
+
+        let median = FaceParsing.percentile(flat, of: 640, at: 1, over: 2)
+
+        XCTAssertNotNil(median)
+        XCTAssertEqual(median!, 0.5, accuracy: 0.02)
+    }
+
+    func testAPercentileOfNothingIsNil() {
+        XCTAssertNil(FaceParsing.percentile([Int](repeating: 0, count: 64),
+                                            of: 0, at: 9, over: 10))
+    }
+
+    /// Everything in one bin means every percentile lands in that bin.
+    func testASingleBinAnswersEveryPercentile() {
+        var histogram = [Int](repeating: 0, count: 64)
+        histogram[48] = 100
+
+        for numerator in 1...9 {
+            let value = FaceParsing.percentile(histogram, of: 100, at: numerator, over: 10)
+            XCTAssertEqual(value!, (48.5) / 64, accuracy: 1e-5)
+        }
+    }
+}

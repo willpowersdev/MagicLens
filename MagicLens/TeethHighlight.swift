@@ -120,6 +120,11 @@ struct TeethHighlightConfiguration: Sendable, Equatable {
     /// to about 0.30 — and where tongue and gums start, around 0.45.
     var maskMaximumSaturation: Float = 0.38
 
+    /// How much redder than a measured tooth a pixel may be and still count as
+    /// one. Covers the teeth at the corners of the mouth, which sit in the
+    /// lips' shadow and pick up a little colour from them.
+    var maskSaturationHeadroom: Float = 0.12
+
     /// Everything forced into a usable range, so a bad value degrades rather
     /// than producing an inverted or never-satisfied test.
     var sanitized: TeethHighlightConfiguration {
@@ -145,6 +150,7 @@ struct TeethHighlightConfiguration: Sendable, Equatable {
         copy.maskBrightnessFraction = maskBrightnessFraction.clamped(to: 0...1)
         copy.maskMinimumBrightness = maskMinimumBrightness.clamped(to: 0...1)
         copy.maskMaximumSaturation = maskMaximumSaturation.clamped(to: 0...1)
+        copy.maskSaturationHeadroom = maskSaturationHeadroom.clamped(to: 0...1)
 
         return copy
     }
