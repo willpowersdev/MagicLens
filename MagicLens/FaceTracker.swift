@@ -144,6 +144,11 @@ final class FaceTracker {
     private var lastBufferFace: CFAbsoluteTime = 0
     private var lastLandmarkAttempt: CFAbsoluteTime = 0
     private var visionInFlight = false
+
+    /// The previous run's raw eye centres, for measuring velocity across two
+    /// detections rather than against the smoothed position.
+    private var measuredLeftEye: SIMD2<Float>?
+    private var measuredRightEye: SIMD2<Float>?
     private var storedConfiguration = TeethHighlightConfiguration()
     private var storedEyeGlow = EyeGlowConfiguration()
     private var loggedMouth = false
@@ -203,23 +208,48 @@ final class FaceTracker {
         let eyesStale = now - lastLandmarks > Self.landmarkGraceSeconds
 
         if let eyeTarget, !eyesStale {
-            // Eyes arrive at a twelfth the rate of frames, so they lean harder
-            // on smoothing than the box does — chased too quickly they step.
-            let follow = min(1, Self.followRate * 0.6)
-            tracked.leftEye += (eyeTarget.leftEye - tracked.leftEye) * follow
-            tracked.rightEye += (eyeTarget.rightEye - tracked.rightEye) * follow
-            tracked.leftPupil += (eyeTarget.leftPupil - tracked.leftPupil) * follow
-            tracked.rightPupil += (eyeTarget.rightPupil - tracked.rightPupil) * follow
+            let settings = storedEyeGlow
+
+            // Time-based, so the glow settles in the same number of
+            // milliseconds at any frame rate.
+            let follow = settings.follow(forElapsed: Double(elapsed))
+
+            // Landmarks describe where the eyes were when Vision ran, which at
+            // a twelfth of the frame rate is most of a tenth of a second ago.
+            // Chasing that position unchanged is the bulk of the lag, so the
+            // reading is carried forward along its own velocity first — the
+            // glow then chases where the eyes are rather than where they were.
+            let lead = settings.lead(forLandmarkAge: now - lastLandmarks)
+
+            let leftShift = eyeTarget.leftVelocity * lead
+            let rightShift = eyeTarget.rightVelocity * lead
+
+            let leftAhead = EyeGeometry.predicted(eyeTarget.leftEye,
+                                                  velocity: eyeTarget.leftVelocity,
+                                                  seconds: lead)
+            let rightAhead = EyeGeometry.predicted(eyeTarget.rightEye,
+                                                   velocity: eyeTarget.rightVelocity,
+                                                   seconds: lead)
+
+            tracked.leftEye += (leftAhead - tracked.leftEye) * follow
+            tracked.rightEye += (rightAhead - tracked.rightEye) * follow
+
+            // The pupils move with their own eye rather than being predicted
+            // separately — they sit inside it, and two independent estimates
+            // would let them drift out of it.
+            tracked.leftPupil += (eyeTarget.leftPupil + leftShift - tracked.leftPupil) * follow
+            tracked.rightPupil += (eyeTarget.rightPupil + rightShift - tracked.rightPupil) * follow
             tracked.eyePresence += (1 - tracked.eyePresence) * step
 
             // The contours themselves, on the same terms as the mouth below.
             // Without this the glow has nothing to draw: `tracked` is what the
             // renderer reads, and only the centres were ever carried across.
+            // Shifted with their own eye, so the shape stays around the centre.
             tracked.leftEyeShape = Self.follow(tracked.leftEyeShape,
-                                               towards: eyeTarget.leftEyeShape,
+                                               towards: eyeTarget.leftEyeShape.map { $0 + leftShift },
                                                rate: follow)
             tracked.rightEyeShape = Self.follow(tracked.rightEyeShape,
-                                                towards: eyeTarget.rightEyeShape,
+                                                towards: eyeTarget.rightEyeShape.map { $0 + rightShift },
                                                 rate: follow)
 
             tracked.leftOpenness += (eyeTarget.leftOpenness - tracked.leftOpenness) * follow
@@ -513,17 +543,26 @@ final class FaceTracker {
                                                      settings.fullEyeOpenness,
                                                      EyeGeometry.openness(of: rightShape))
 
-        // Measured against the previous accepted landmarks rather than the
-        // rendered frame, since these arrive far less often.
+        // Between successive measurements, not against the smoothed position.
+        //
+        // The smoothed value is deliberately behind, so measuring from it
+        // reports the smoother's own error rather than how fast the head is
+        // moving — and prediction built on that reading chases its own tail.
+        // Two raw readings and the interval between them is the honest figure.
         let sinceLast = CFAbsoluteTimeGetCurrent() - lastLandmarks
-        if lastLandmarks > 0, sinceLast < Self.landmarkGraceSeconds {
-            found.leftVelocity = EyeGeometry.velocity(from: tracked.leftEye,
+        if lastLandmarks > 0, sinceLast < Self.landmarkGraceSeconds,
+           let previousLeft = measuredLeftEye, let previousRight = measuredRightEye {
+
+            found.leftVelocity = EyeGeometry.velocity(from: previousLeft,
                                                       to: leftEye,
                                                       elapsed: sinceLast)
-            found.rightVelocity = EyeGeometry.velocity(from: tracked.rightEye,
+            found.rightVelocity = EyeGeometry.velocity(from: previousRight,
                                                        to: rightEye,
                                                        elapsed: sinceLast)
         }
+
+        measuredLeftEye = leftEye
+        measuredRightEye = rightEye
 
         // Vertex-wise smoothing only makes sense when the contours correspond.
         // A different point count means Vision found a different shape, so take

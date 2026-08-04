@@ -140,8 +140,15 @@ struct EyeGlowConfiguration: Sendable, Equatable {
     /// compounds and the screen washes out.
     var maximumTrailBrightness: Float = 5.0
 
-    var landmarkSmoothing: Float = 0.32
-    var predictionSeconds: Float = 0.015
+    /// How far to chase a new landmark reading in one frame *at 60fps*. The
+    /// actual per-frame figure comes from elapsed time — see
+    /// `follow(forElapsed:)`.
+    var landmarkSmoothing: Float = 0.45
+
+    /// How far ahead of the landmarks to draw, on top of cancelling their
+    /// measured age. Covers what the age can't see: Vision's own processing,
+    /// and the frame's trip to the display.
+    var predictionSeconds: Float = 0.02
 
     var minimumTrackingConfidence: Float = 0.45
 
@@ -204,6 +211,34 @@ struct EyeGlowConfiguration: Sendable, Equatable {
     func decay(forElapsed elapsed: Double) -> Float {
         let clamped = min(max(elapsed, 1.0 / 240.0), 1.0 / 15.0)
         return pow(trailDecayAt60FPS, Float(clamped * 60))
+    }
+
+    /// How far to move towards the latest landmarks this frame.
+    ///
+    /// The same reasoning as `decay(forElapsed:)`, and for the same reason: a
+    /// fixed per-frame fraction settles in a fixed number of *frames*, so the
+    /// glow would trail further behind at 30 than at 120 and there would be no
+    /// single value that felt right on both.
+    func follow(forElapsed elapsed: Double) -> Float {
+        let clamped = min(max(elapsed, 1.0 / 240.0), 1.0 / 15.0)
+        return 1 - pow(1 - landmarkSmoothing, Float(clamped * 60))
+    }
+
+    /// Never project further ahead than this, however stale the landmarks are.
+    ///
+    /// Vision stalling doesn't mean the head kept moving at the last measured
+    /// speed, and extrapolating a long way on that assumption throws the glow
+    /// off the face entirely — worse than the lag it is there to hide.
+    static let maximumLeadSeconds = 0.12
+
+    /// How far ahead to draw, given how long ago the landmarks were measured.
+    ///
+    /// Vision runs at a twelfth of the frame rate, so its results describe
+    /// where the eyes were up to 80ms ago. Drawing them unchanged is most of
+    /// the lag: the glow is chasing a position the head has already left.
+    /// Advancing along the measured velocity by that same age cancels it.
+    func lead(forLandmarkAge age: Double) -> Float {
+        Float(min(max(age, 0), Self.maximumLeadSeconds)) + predictionSeconds
     }
 }
 

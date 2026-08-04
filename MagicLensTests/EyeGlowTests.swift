@@ -72,6 +72,85 @@ final class EyeGlowTests: XCTestCase {
         XCTAssertFalse(value.isNaN)
     }
 
+    /// Landmark chasing has the same problem the trail does: a fixed per-frame
+    /// fraction settles in a fixed number of frames, so the glow would sit
+    /// further behind the eyes at 30 than at 120.
+    func testSmoothingSettlesInTheSameTimeAtAnyFrameRate() {
+        let configuration = EyeGlowConfiguration()
+
+        func remainingAfterOneSecond(atFPS fps: Double) -> Float {
+            let perFrame = configuration.follow(forElapsed: 1.0 / fps)
+            return pow(1 - perFrame, Float(fps))
+        }
+
+        XCTAssertEqual(remainingAfterOneSecond(atFPS: 30),
+                       remainingAfterOneSecond(atFPS: 60), accuracy: 0.001)
+        XCTAssertEqual(remainingAfterOneSecond(atFPS: 60),
+                       remainingAfterOneSecond(atFPS: 120), accuracy: 0.001)
+    }
+
+    func testSmoothingMatchesTheConfiguredFigureAtSixty() {
+        let configuration = EyeGlowConfiguration()
+        XCTAssertEqual(configuration.follow(forElapsed: 1.0 / 60.0),
+                       configuration.landmarkSmoothing,
+                       accuracy: 1e-5)
+    }
+
+    func testSmoothingNeverOvershootsOrStalls() {
+        let configuration = EyeGlowConfiguration()
+
+        for elapsed in [0.0, 1e-6, 1.0 / 120.0, 0.5, 10.0] {
+            let follow = configuration.follow(forElapsed: elapsed)
+            XCTAssertGreaterThan(follow, 0)
+            XCTAssertLessThanOrEqual(follow, 1)
+            XCTAssertFalse(follow.isNaN)
+        }
+    }
+
+    // MARK: - Prediction
+
+    /// The lag being fixed: Vision runs at a twelfth of the frame rate, so its
+    /// answer is up to 80ms old by the time it is drawn. Cancelling that age
+    /// is most of what stops the glow chasing the eyes.
+    func testTheLeadCancelsTheAgeOfTheLandmarks() {
+        let configuration = EyeGlowConfiguration()
+
+        let lead = configuration.lead(forLandmarkAge: 1.0 / 12.0)
+
+        XCTAssertEqual(lead,
+                       Float(1.0 / 12.0) + configuration.predictionSeconds,
+                       accuracy: 1e-5)
+    }
+
+    /// Fresh landmarks still lead a little, for the part of the pipeline the
+    /// age can't see.
+    func testFreshLandmarksStillLeadSlightly() {
+        let configuration = EyeGlowConfiguration()
+
+        XCTAssertEqual(configuration.lead(forLandmarkAge: 0),
+                       configuration.predictionSeconds,
+                       accuracy: 1e-6)
+    }
+
+    /// Vision stalling doesn't mean the head kept moving. Extrapolating a long
+    /// way on that assumption throws the glow clean off the face, which is
+    /// worse than the lag.
+    func testTheLeadIsCappedWhenTrackingStalls() {
+        let configuration = EyeGlowConfiguration()
+
+        let stalled = configuration.lead(forLandmarkAge: 5)
+
+        XCTAssertEqual(stalled,
+                       Float(EyeGlowConfiguration.maximumLeadSeconds)
+                           + configuration.predictionSeconds,
+                       accuracy: 1e-5)
+    }
+
+    func testANegativeAgeDoesNotDragTheGlowBackwards() {
+        let configuration = EyeGlowConfiguration()
+        XCTAssertGreaterThanOrEqual(configuration.lead(forLandmarkAge: -1), 0)
+    }
+
     // MARK: - Geometry
 
     private let eye = [SIMD2<Float>(0.40, 0.50), SIMD2<Float>(0.45, 0.53),
