@@ -28,6 +28,47 @@ final class TrackingMTKView: MTKView {
 
     #if os(macOS)
 
+    /// Locks the window's proportions to the camera's, so resizing can't
+    /// introduce bars or crop the picture.
+    ///
+    /// Fullscreen is the exception — the window takes the display's shape
+    /// whatever it wants — and there the letterboxing in sampleVideo keeps the
+    /// whole frame visible rather than cropping it.
+    func matchWindowAspect(toVideo size: CGSize) {
+        guard size.width > 0, size.height > 0, let window else {
+            return
+        }
+
+        let ratio = NSSize(width: size.width, height: size.height)
+
+        guard window.contentAspectRatio != ratio else {
+            return
+        }
+
+        // contentAspectRatio, not aspectRatio: the latter constrains the whole
+        // frame, so the title bar's height would be counted as picture and the
+        // video would come out slightly the wrong shape.
+        window.contentAspectRatio = ratio
+
+        // The window is whatever shape it was before the camera started, so
+        // bring it into line once, keeping its width and area roughly as they
+        // were rather than jumping to the video's pixel size.
+        guard !window.styleMask.contains(.fullScreen) else {
+            return
+        }
+
+        let frame = window.frame
+        let chrome = frame.height - window.contentLayoutRect.height
+        let contentWidth = window.contentLayoutRect.width
+        let height = (contentWidth * size.height / size.width) + chrome
+
+        window.setFrame(NSRect(x: frame.origin.x,
+                               y: frame.origin.y + (frame.height - height),
+                               width: frame.width,
+                               height: height),
+                        display: true, animate: false)
+    }
+
     /// AppKit's y axis runs the other way, so this flips to match UIKit — and
     /// therefore to match what the shaders were written against.
     private func track(event: NSEvent) {

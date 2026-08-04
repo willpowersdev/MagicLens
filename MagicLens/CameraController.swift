@@ -9,7 +9,7 @@ import Observation
 /// The current touch location, normalised to the view's bounds.
 ///
 /// Deliberately kept outside the observation system: it changes on every drag
-/// event and the renderer polls it once per frame, so publishing it would
+/// event and åthe renderer polls it once per frame, so publishing it would
 /// invalidate the view hierarchy at touch frequency for no benefit.
 final class TouchState {
     var normalized = SIMD2<Float>(0.5, 0.5)
@@ -33,7 +33,7 @@ final class CameraController {
     /// A `let` holding a reference type, so the macro leaves it alone.
     let touch = TouchState()
 
-    var effect: Effect = .crt
+    var effect: Effect = .infrared
 
     init() {
         // Every device this app supports has Metal; there is no meaningful

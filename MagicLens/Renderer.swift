@@ -111,17 +111,17 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     /// Whether to fit the whole frame into the view rather than filling it.
     ///
-    /// A window is any shape at all, so filling one throws picture away — a
-    /// wide window loses the top and bottom, which is exactly what a camera
-    /// preview should not do. A phone screen is fixed and close to the camera's
-    /// own shape, so there filling is right and loses almost nothing.
-    static var letterboxes: Bool {
-        #if os(macOS)
-        true
-        #else
-        false
-        #endif
-    }
+    /// Off on both platforms, because neither needs it. A phone screen is fixed
+    /// and close to the camera's shape; a Mac window is held to the camera's
+    /// shape outright, so there is nothing to letterbox.
+    ///
+    /// Fullscreen is the one case where the shape can't be honoured — the
+    /// display's proportions are whatever they are — and filling is the right
+    /// answer there. Letterboxing would mean black bars in the one mode meant
+    /// to be immersive, and the crop is a few per cent off the long edge rather
+    /// than anything structural. The alternative is kept because it is one flag
+    /// away if the trade ever looks wrong.
+    static var letterboxes: Bool { false }
 
 
     /// Matches the top of the gradient, so a dropped frame is invisible.
@@ -376,6 +376,18 @@ final class Renderer: NSObject, MTKViewDelegate {
         let scale = Self.videoToViewScale(cameraResolution: cameraResolution,
                                           viewResolution: viewResolution,
                                           rotated: needsRotation)
+
+        #if os(macOS)
+        // Keep the window the camera's shape, so there is nothing to letterbox
+        // in the first place. Fullscreen can't honour it, and falls back to the
+        // bars rather than throwing picture away.
+        if cameraResolution.x > 0, let tracking = view as? TrackingMTKView {
+            let videoSize = needsRotation
+                ? CGSize(width: CGFloat(cameraResolution.y), height: CGFloat(cameraResolution.x))
+                : CGSize(width: CGFloat(cameraResolution.x), height: CGFloat(cameraResolution.y))
+            tracking.matchWindowAspect(toVideo: videoSize)
+        }
+        #endif
         let toView = { Self.videoPointToView($0, scale: scale) }
 
         if let videoTexture = feed.currentTexture, let pipelineState = effectPipelineState {
