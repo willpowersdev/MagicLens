@@ -86,6 +86,35 @@ static inline float4 sampleVideo(texture2d<float> video,
         screen.x = 1.0 - screen.x;
     }
 
+    // Fill the view without distorting the picture.
+    //
+    // The quad always covers the drawable, so without this the video is simply
+    // stretched to whatever shape the view happens to be — unnoticeable on a
+    // phone screen that roughly matches the camera, and badly wrong in a
+    // resizable window. Scaling uv about the centre crops the overflowing axis
+    // instead, which is aspect-fill.
+    //
+    // Applied here rather than in each effect because it belongs to the video,
+    // not to the effect's own coordinate space: every shader keeps working in
+    // plain screen uv.
+    float2 videoSize = uniforms.videoRotated > 0.5
+        ? float2(uniforms.cameraResolution.y, uniforms.cameraResolution.x)
+        : uniforms.cameraResolution;
+
+    if (videoSize.x > 0.0 && videoSize.y > 0.0 && uniforms.resolution.y > 0.0) {
+        float videoAspect = videoSize.x / videoSize.y;
+        float viewAspect = uniforms.resolution.x / uniforms.resolution.y;
+
+        float2 scale = float2(1.0);
+        if (videoAspect > viewAspect) {
+            scale.x = viewAspect / videoAspect;   // wider than the view: crop the sides
+        } else {
+            scale.y = videoAspect / viewAspect;   // taller: crop top and bottom
+        }
+
+        screen = (screen - 0.5) * scale + 0.5;
+    }
+
     // Stand the landscape frame up: a quarter turn clockwise. Destination
     // (x, y) reads from source (y, 1 - x).
     float2 texCoord = uniforms.videoRotated > 0.5

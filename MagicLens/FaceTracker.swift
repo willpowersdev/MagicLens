@@ -174,6 +174,16 @@ final class FaceTracker {
     ///
     /// `bufferIsLandscape` and `mirrored` must match what the shaders are told,
     /// or the face will be tracked somewhere other than where it's drawn.
+    /// Whether the shaders are rotating the frame. The tracker has to agree,
+    /// or faces are followed in a different space to the one they're drawn in.
+    static func rotates(bufferIsLandscape: Bool) -> Bool {
+        #if os(macOS)
+        false
+        #else
+        bufferIsLandscape
+        #endif
+    }
+
     func update(faces: [AVMetadataFaceObject],
                 bufferIsLandscape: Bool,
                 mirrored: Bool,
@@ -186,7 +196,7 @@ final class FaceTracker {
         }
 
         let box = Self.uvRect(fromBuffer: largest.bounds,
-                              rotated: bufferIsLandscape,
+                              rotated: Self.rotates(bufferIsLandscape: bufferIsLandscape),
                               mirrored: mirrored)
 
         lock.lock()
@@ -299,7 +309,7 @@ final class FaceTracker {
             let inBuffer = CGPoint(x: centre.x, y: 1 - centre.y)
 
             let mapped = Self.uvPoint(fromBuffer: inBuffer,
-                                      rotated: bufferIsLandscape,
+                                      rotated: Self.rotates(bufferIsLandscape: bufferIsLandscape),
                                       mirrored: mirrored)
 
             return SIMD2(Float(mapped.x), Float(mapped.y))
@@ -320,7 +330,7 @@ final class FaceTracker {
                                       y: box.origin.y + point.y * box.height)
                 let inBuffer = CGPoint(x: inImage.x, y: 1 - inImage.y)
                 let mapped = Self.uvPoint(fromBuffer: inBuffer,
-                                          rotated: bufferIsLandscape,
+                                          rotated: Self.rotates(bufferIsLandscape: bufferIsLandscape),
                                           mirrored: mirrored)
                 return SIMD2(Float(mapped.x), Float(mapped.y))
             }
@@ -330,7 +340,7 @@ final class FaceTracker {
                                                      y: 1 - box.maxY,
                                                      width: box.width,
                                                      height: box.height),
-                                  rotated: bufferIsLandscape,
+                                  rotated: Self.rotates(bufferIsLandscape: bufferIsLandscape),
                                   mirrored: mirrored)
         let faceExtent = SIMD2(Float(faceBox.width), Float(faceBox.height))
 

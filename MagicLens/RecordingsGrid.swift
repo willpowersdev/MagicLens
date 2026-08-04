@@ -97,6 +97,8 @@ struct RecordingsGrid: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+        .frame(maxWidth: 900)
+        .frame(maxWidth: .infinity)
     }
 }
 

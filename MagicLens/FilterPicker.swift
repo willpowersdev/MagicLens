@@ -32,6 +32,11 @@ struct FilterPicker: View {
                         Divider().padding(.leading, 20)
                     }
                 }
+                // Short labels stretched across a wide window leave the
+                // checkmark stranded at the far edge, so the list keeps a
+                // readable width and centres in whatever space there is.
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
         }
         .background(Color.pageBackground)
@@ -71,6 +76,8 @@ struct FilterPicker: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
     }
 }
 

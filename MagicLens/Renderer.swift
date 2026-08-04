@@ -294,7 +294,16 @@ final class Renderer: NSObject, MTKViewDelegate {
 
             // Read off the frame itself rather than assumed, so this stays right
             // if some device or format does hand back an already-rotated buffer.
-            let arrivedLandscape = videoTexture.width > videoTexture.height
+            //
+            // Only iOS needs the quarter turn: a phone is held upright while its
+            // sensor delivers landscape. A Mac's camera is already the right way
+            // up for a landscape window, so rotating there lays the picture on
+            // its side.
+            #if os(macOS)
+            let needsRotation = false
+            #else
+            let needsRotation = videoTexture.width > videoTexture.height
+            #endif
 
             var uniforms = Uniforms(
                 resolution: SIMD2(Float(view.drawableSize.width),
@@ -303,7 +312,7 @@ final class Renderer: NSObject, MTKViewDelegate {
                                         Float(videoTexture.height)),
                 touchPoint: touch.normalized,
                 globalTime: Float(Date().timeIntervalSince(startDate)),
-                videoRotated: arrivedLandscape ? 1.0 : 0.0,
+                videoRotated: needsRotation ? 1.0 : 0.0,
                 videoMirrored: feed.isFrontFacing ? 1.0 : 0.0,
                 faceCenter: face.center,
                 faceSize: face.size,

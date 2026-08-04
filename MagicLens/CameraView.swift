@@ -14,6 +14,16 @@ struct CameraView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Clear of the title bar on a Mac, where the window's content starts under
+    /// it; iOS has already inset for the safe area by this point.
+    private static var topInset: CGFloat {
+        #if os(macOS)
+        16
+        #else
+        8
+        #endif
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             // No gesture here: touch tracking lives in the MTKView itself.
@@ -35,10 +45,12 @@ struct CameraView: View {
                         libraryButton
                     }
                 }
+                .frame(maxWidth: 460)
+
                 Spacer()
             }
             .padding(.horizontal, 24)
-            .padding(.top, 8)
+            .padding(.top, Self.topInset)
 
             // Presented inside this hierarchy rather than with .sheet.
             //
@@ -99,6 +111,7 @@ struct CameraView: View {
                     Image(systemName: "camera.filters")
                         .controlIcon()
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Choose effect")
 
                 Spacer()
@@ -109,11 +122,15 @@ struct CameraView: View {
                     Image(systemName: "camera.rotate")
                         .controlIcon()
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Switch camera")
             }
         }
+        // Capped so a wide window spreads the controls into a sensible cluster
+        // rather than pinning them to opposite edges metres apart.
+        .frame(maxWidth: 460)
         .padding(.horizontal, 24)
-        .padding(.bottom, 8)
+        .padding(.bottom, 12)
     }
 
     /// The familiar camera control: a ring with a red fill that squares off
@@ -136,6 +153,7 @@ struct CameraView: View {
                            height: controller.isRecording ? 30 : 58)
             }
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(controller.isRecording ? "Stop recording" : "Start recording")
     }
 
@@ -176,6 +194,7 @@ struct CameraView: View {
             Image(systemName: showsFaceOverlay ? "viewfinder.circle.fill" : "viewfinder")
                 .controlIcon(tint: showsFaceOverlay ? .green : .white)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel("Face tracking overlay")
         .opacity(controller.isRecording ? 0 : 1)
         .disabled(controller.isRecording)
@@ -192,6 +211,7 @@ struct CameraView: View {
             Image(systemName: "square.grid.2x2")
                 .controlIcon()
         }
+        .buttonStyle(.plain)
         .accessibilityLabel("Recordings")
         .opacity(controller.isRecording ? 0 : 1)
         .disabled(controller.isRecording)
