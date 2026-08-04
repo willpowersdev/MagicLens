@@ -472,25 +472,31 @@ final class Renderer: NSObject, MTKViewDelegate {
         #endif
         let toView = { Self.videoPointToView($0, scale: scale) }
 
+        // One set of uniforms for both draws. The overlay used to build its own
+        // with the video fields zeroed, which was harmless while it only drew a
+        // box and a cross — but it now samples the segmentation mask, and that
+        // is mapped back into video space using exactly these fields. Zeroed,
+        // it unmirrored the mask while the effect mirrored it.
+        var uniforms = Uniforms(
+            resolution: viewResolution,
+            cameraResolution: cameraResolution,
+            touchPoint: touch.normalized,
+            globalTime: Float(Date().timeIntervalSince(startDate)),
+            videoRotated: needsRotation ? 1.0 : 0.0,
+            videoMirrored: feed.isFrontFacing ? 1.0 : 0.0,
+            videoLetterboxed: Self.letterboxes ? 1.0 : 0.0,
+            faceCenter: toView(face.center),
+            faceSize: face.size / scale,
+            facePresence: face.presence,
+            leftEye: toView(face.leftEye),
+            rightEye: toView(face.rightEye),
+            leftPupil: toView(face.leftPupil),
+            rightPupil: toView(face.rightPupil),
+            eyePresence: face.eyePresence)
+
         if let videoTexture = feed.currentTexture, let pipelineState = effectPipelineState {
             encoder.setRenderPipelineState(pipelineState)
 
-            var uniforms = Uniforms(
-                resolution: viewResolution,
-                cameraResolution: cameraResolution,
-                touchPoint: touch.normalized,
-                globalTime: Float(Date().timeIntervalSince(startDate)),
-                videoRotated: needsRotation ? 1.0 : 0.0,
-                videoMirrored: feed.isFrontFacing ? 1.0 : 0.0,
-                videoLetterboxed: Self.letterboxes ? 1.0 : 0.0,
-                faceCenter: toView(face.center),
-                faceSize: face.size / scale,
-                facePresence: face.presence,
-                leftEye: toView(face.leftEye),
-                rightEye: toView(face.rightEye),
-                leftPupil: toView(face.leftPupil),
-                rightPupil: toView(face.rightPupil),
-                eyePresence: face.eyePresence)
 
             // Small enough to go inline rather than through an MTLBuffer.
             encoder.setFragmentBytes(&uniforms,
@@ -516,26 +522,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         // it reads the face exactly as the effects do, which is what makes it
         // worth trusting as a check on them.
         if showsFaceOverlay, let overlay = faceOverlayPipelineState {
-            var overlayUniforms = Uniforms(
-                resolution: SIMD2(Float(view.drawableSize.width),
-                                  Float(view.drawableSize.height)),
-                cameraResolution: .zero,
-                touchPoint: touch.normalized,
-                globalTime: 0,
-                videoRotated: 0,
-                videoMirrored: 0,
-                videoLetterboxed: 0,
-                faceCenter: toView(face.center),
-                faceSize: face.size / scale,
-                facePresence: face.presence,
-                leftEye: toView(face.leftEye),
-                rightEye: toView(face.rightEye),
-                leftPupil: toView(face.leftPupil),
-                rightPupil: toView(face.rightPupil),
-                eyePresence: face.eyePresence)
-
             encoder.setRenderPipelineState(overlay)
-            encoder.setFragmentBytes(&overlayUniforms,
+            encoder.setFragmentBytes(&uniforms,
                                      length: MemoryLayout<Uniforms>.stride,
                                      index: 0)
             bindMouth(face: face, mask: mouthMask, scale: scale, to: encoder)

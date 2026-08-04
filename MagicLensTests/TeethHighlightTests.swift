@@ -948,3 +948,53 @@ final class TeethRenderTests: XCTestCase {
         print("[teeth] wrote \(url.path)")
     }
 }
+
+/// The tracker maps camera coordinates into view space; the shaders map view
+/// space back to camera coordinates. They have to be exact inverses, or
+/// anything tracked is drawn somewhere other than the thing it is tracking —
+/// and that reads as bad detection rather than as a coordinate bug.
+final class CoordinateRoundTripTests: XCTestCase {
+
+    /// videoTexCoord from ShaderCommon.h, without the aspect step, which the
+    /// renderer handles separately on the CPU.
+    private func shaderForward(_ uv: CGPoint, rotated: Bool, mirrored: Bool) -> CGPoint {
+        var screen = CGPoint(x: uv.x, y: 1 - uv.y)
+
+        if mirrored {
+            screen.x = 1 - screen.x
+        }
+
+        return rotated ? CGPoint(x: screen.y, y: 1 - screen.x) : screen
+    }
+
+    func testTrackerInvertsTheShaderForEveryOrientation() {
+        for rotated in [false, true] {
+            for mirrored in [false, true] {
+                for x in stride(from: 0.05, through: 0.95, by: 0.15) {
+                    for y in stride(from: 0.05, through: 0.95, by: 0.15) {
+                        let uv = CGPoint(x: x, y: y)
+
+                        let texture = shaderForward(uv, rotated: rotated, mirrored: mirrored)
+                        let back = FaceTracker.uvPoint(fromBuffer: texture,
+                                                       rotated: rotated,
+                                                       mirrored: mirrored)
+
+                        XCTAssertEqual(back.x, uv.x, accuracy: 1e-6,
+                                       "x round trip failed: rotated \(rotated), mirrored \(mirrored)")
+                        XCTAssertEqual(back.y, uv.y, accuracy: 1e-6,
+                                       "y round trip failed: rotated \(rotated), mirrored \(mirrored)")
+                    }
+                }
+            }
+        }
+    }
+
+    /// The macOS case specifically: unrotated and mirrored, which is what the
+    /// Mac camera became once mirroring was turned on for it.
+    func testUnrotatedMirroredIsAHorizontalReflection() {
+        let left = FaceTracker.uvPoint(fromBuffer: CGPoint(x: 0.2, y: 0.5),
+                                       rotated: false, mirrored: true)
+        XCTAssertEqual(left.x, 0.8, accuracy: 1e-6,
+                       "a face on one side of the buffer must appear on the other side of the view")
+    }
+}
