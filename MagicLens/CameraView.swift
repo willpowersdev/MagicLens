@@ -36,17 +36,7 @@ struct CameraView: View {
             controls
 
             VStack {
-                ZStack {
-                    recordingBadge
-
-                    HStack {
-                        faceOverlayButton
-                        Spacer()
-                        libraryButton
-                    }
-                }
-                .frame(maxWidth: 460)
-
+                recordingBadge
                 Spacer()
             }
             .padding(.horizontal, 24)
@@ -97,40 +87,43 @@ struct CameraView: View {
     }
 
     private var controls: some View {
-        // The record button is centred on the screen rather than spaced between
-        // the others, which is why it sits in its own layer.
-        ZStack {
+        // One even row. Equal spacing throughout rather than groups pushed to
+        // the edges, so the gap either side of the record button matches the
+        // gaps between the rest. Two equal-sized controls each side leave it
+        // centred without having to be positioned.
+        HStack(spacing: 18) {
+            effectButton
+            faceOverlayButton
             recordButton
-
-            HStack {
-                Button {
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        isShowingPicker = true
-                    }
-                } label: {
-                    Image(systemName: "camera.filters")
-                        .controlIcon()
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Choose effect")
-
-                Spacer()
-
-                Button {
-                    controller.flipCamera()
-                } label: {
-                    Image(systemName: "camera.rotate")
-                        .controlIcon()
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Switch camera")
-            }
+            libraryButton
+            flipButton
         }
-        // Capped so a wide window spreads the controls into a sensible cluster
-        // rather than pinning them to opposite edges metres apart.
-        .frame(maxWidth: 460)
         .padding(.horizontal, 24)
         .padding(.bottom, 12)
+    }
+
+    private var effectButton: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.25)) {
+                isShowingPicker = true
+            }
+        } label: {
+            Image(systemName: "camera.filters")
+                .controlIcon()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Choose effect")
+    }
+
+    private var flipButton: some View {
+        Button {
+            controller.flipCamera()
+        } label: {
+            Image(systemName: "camera.rotate")
+                .controlIcon()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Switch camera")
     }
 
     /// The familiar camera control: a ring with a red fill that squares off
