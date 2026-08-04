@@ -17,6 +17,13 @@ struct Uniforms {
     var videoRotated: Float
     /// 1 for the selfie camera, which wants mirroring.
     var videoMirrored: Float
+
+    /// Where the tracked face is, in the same uv space the effects use.
+    var faceCenter: SIMD2<Float>
+    /// Its width and height as a fraction of the screen.
+    var faceSize: SIMD2<Float>
+    /// 0 when nobody is there, ramping to 1 when someone is.
+    var facePresence: Float
 }
 
 /// Draws a full screen quad textured with the latest camera frame and run
@@ -60,6 +67,18 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// Restarted whenever the effect changes, so time based effects begin from
     /// zero rather than mid-animation.
     private var startDate = Date()
+
+    private var lastDrawTime: CFAbsoluteTime?
+
+    /// Draws the tracked face box over whatever effect is running.
+    var showsFaceOverlay = false
+
+    private lazy var faceOverlayPipelineState: MTLRenderPipelineState? = {
+        Self.makePipelineState(device: device,
+                               library: library,
+                               fragmentFunction: "fragment_facedebug",
+                               blended: true)
+    }()
 
 
     init(controller: CameraController) {
@@ -138,7 +157,8 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     private static func makePipelineState(device: MTLDevice,
                                           library: MTLLibrary,
-                                          fragmentFunction: String) -> MTLRenderPipelineState? {
+                                          fragmentFunction: String,
+                                          blended: Bool = false) -> MTLRenderPipelineState? {
 
         guard let vertexProgram = library.makeFunction(name: "vertex_func"),
               let fragmentProgram = library.makeFunction(name: fragmentFunction) else {
@@ -150,6 +170,17 @@ final class Renderer: NSObject, MTKViewDelegate {
         descriptor.vertexFunction = vertexProgram
         descriptor.fragmentFunction = fragmentProgram
         descriptor.colorAttachments[0].pixelFormat = colorPixelFormat
+
+        // Overlays draw over the effect rather than replacing it.
+        if blended {
+            descriptor.colorAttachments[0].isBlendingEnabled = true
+            descriptor.colorAttachments[0].rgbBlendOperation = .add
+            descriptor.colorAttachments[0].alphaBlendOperation = .add
+            descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+            descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        }
 
         do {
             return try device.makeRenderPipelineState(descriptor: descriptor)
@@ -193,6 +224,13 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
+        // Advanced once per rendered frame, so its smoothing and fades run on
+        // the display's clock rather than the camera's.
+        let now = CFAbsoluteTimeGetCurrent()
+        let elapsed = lastDrawTime.map { Float(max(0, min(0.25, now - $0))) } ?? 0
+        lastDrawTime = now
+        let face = feed.faces.face(at: now, elapsed: elapsed)
+
         if let videoTexture = feed.currentTexture, let pipelineState = effectPipelineState {
             encoder.setRenderPipelineState(pipelineState)
 
@@ -208,7 +246,10 @@ final class Renderer: NSObject, MTKViewDelegate {
                 touchPoint: touch.normalized,
                 globalTime: Float(Date().timeIntervalSince(startDate)),
                 videoRotated: arrivedLandscape ? 1.0 : 0.0,
-                videoMirrored: feed.isFrontFacing ? 1.0 : 0.0)
+                videoMirrored: feed.isFrontFacing ? 1.0 : 0.0,
+                faceCenter: face.center,
+                faceSize: face.size,
+                facePresence: face.presence)
 
             // Small enough to go inline rather than through an MTLBuffer.
             encoder.setFragmentBytes(&uniforms,
@@ -224,6 +265,33 @@ final class Renderer: NSObject, MTKViewDelegate {
                                       indexType: .uint32,
                                       indexBuffer: indexBuffer,
                                       indexBufferOffset: 0)
+
+        // A second, blended draw over the effect. Same encoder, same uniforms —
+        // it reads the face exactly as the effects do, which is what makes it
+        // worth trusting as a check on them.
+        if showsFaceOverlay, let overlay = faceOverlayPipelineState {
+            var overlayUniforms = Uniforms(
+                resolution: SIMD2(Float(view.drawableSize.width),
+                                  Float(view.drawableSize.height)),
+                cameraResolution: .zero,
+                touchPoint: touch.normalized,
+                globalTime: 0,
+                videoRotated: 0,
+                videoMirrored: 0,
+                faceCenter: face.center,
+                faceSize: face.size,
+                facePresence: face.presence)
+
+            encoder.setRenderPipelineState(overlay)
+            encoder.setFragmentBytes(&overlayUniforms,
+                                     length: MemoryLayout<Uniforms>.stride,
+                                     index: 0)
+            encoder.drawIndexedPrimitives(type: .triangle,
+                                          indexCount: Self.indexData.count,
+                                          indexType: .uint32,
+                                          indexBuffer: indexBuffer,
+                                          indexBufferOffset: 0)
+        }
 
         encoder.endEncoding()
 

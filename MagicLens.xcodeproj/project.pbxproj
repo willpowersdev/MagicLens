@@ -49,6 +49,8 @@
 		EB0003000000000000000002 /* VideoRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000001 /* VideoRecorder.swift */; };
 		EB0003000000000000000004 /* VideoLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000003 /* VideoLibrary.swift */; };
 		EB0003000000000000000006 /* RecordingsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000005 /* RecordingsGrid.swift */; };
+		EB0006000000000000000002 /* FaceTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0006000000000000000001 /* FaceTracker.swift */; };
+		EB0006000000000000000004 /* FaceEffects.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0006000000000000000003 /* FaceEffects.metal */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -118,6 +120,8 @@
 		EB0003000000000000000001 /* VideoRecorder.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoRecorder.swift; sourceTree = "<group>"; };
 		EB0003000000000000000003 /* VideoLibrary.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoLibrary.swift; sourceTree = "<group>"; };
 		EB0003000000000000000005 /* RecordingsGrid.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordingsGrid.swift; sourceTree = "<group>"; };
+		EB0006000000000000000001 /* FaceTracker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FaceTracker.swift; sourceTree = "<group>"; };
+		EB0006000000000000000003 /* FaceEffects.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = FaceEffects.metal; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -178,6 +182,7 @@
 				EB0003000000000000000001 /* VideoRecorder.swift */,
 				EB0003000000000000000003 /* VideoLibrary.swift */,
 				EB0003000000000000000005 /* RecordingsGrid.swift */,
+				EB0006000000000000000001 /* FaceTracker.swift */,
 				CDCB7706263C012700709455 /* CameraFeed.swift */,
 				CDCB76D5263C00D400709455 /* Info.plist */,
 				CDCB7716263C01B900709455 /* Assets.xcassets */,
@@ -222,6 +227,7 @@
 				EB0000000000000000000014 /* Matrix.metal */,
 				EB0000000000000000000016 /* CRT.metal */,
 				EB0000000000000000000018 /* AntiFisheye.metal */,
+				EB0006000000000000000003 /* FaceEffects.metal */,
 				CDCB771A263D065C00709455 /* Fisheye.metal */,
 				CDCB76F8263C012700709455 /* edgehighlights.fsh */,
 				CDCB76F9263C012700709455 /* infrared.fsh */,
@@ -403,6 +409,7 @@
 				EB0000000000000000000015 /* Matrix.metal in Sources */,
 				EB0000000000000000000017 /* CRT.metal in Sources */,
 				EB0000000000000000000019 /* AntiFisheye.metal in Sources */,
+				EB0006000000000000000004 /* FaceEffects.metal in Sources */,
 				CDCB771B263D065C00709455 /* Fisheye.metal in Sources */,
 				EB0002000000000000000002 /* MagicLensApp.swift in Sources */,
 				EB0002000000000000000004 /* Effect.swift in Sources */,
@@ -414,6 +421,7 @@
 				EB0003000000000000000002 /* VideoRecorder.swift in Sources */,
 				EB0003000000000000000004 /* VideoLibrary.swift in Sources */,
 				EB0003000000000000000006 /* RecordingsGrid.swift in Sources */,
+				EB0006000000000000000002 /* FaceTracker.swift in Sources */,
 				CDCB7715263C012700709455 /* CameraFeed.swift in Sources */,
 				CDCB771D263D0ADF00709455 /* Array+Helpers.swift in Sources */,
 			);

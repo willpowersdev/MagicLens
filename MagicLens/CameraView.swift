@@ -10,6 +10,7 @@ struct CameraView: View {
     @State private var controller = CameraController()
     @State private var isShowingPicker = false
     @State private var isShowingRecordings = false
+    @State private var showsFaceOverlay = false
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -17,7 +18,7 @@ struct CameraView: View {
         ZStack(alignment: .bottom) {
             // No gesture here: touch tracking lives in the MTKView itself.
             // See TouchTrackingMTKView.
-            MetalCameraView(controller: controller)
+            MetalCameraView(controller: controller, showsFaceOverlay: showsFaceOverlay)
                 .ignoresSafeArea()
 
             // Inside the safe area, deliberately — at the physical screen bottom
@@ -29,6 +30,7 @@ struct CameraView: View {
                     recordingBadge
 
                     HStack {
+                        faceOverlayButton
                         Spacer()
                         libraryButton
                     }
@@ -167,6 +169,26 @@ struct CameraView: View {
             }
             .transition(.opacity)
         }
+    }
+
+    /// Turns on the face tracking overlay, for checking that detection lands
+    /// where the effects think it does.
+    private var faceOverlayButton: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showsFaceOverlay.toggle()
+            }
+        } label: {
+            Image(systemName: showsFaceOverlay ? "viewfinder.circle.fill" : "viewfinder")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(showsFaceOverlay ? Color.green : Color.white)
+                .frame(width: 34, height: 34)
+                .padding(8)
+                .background(.black.opacity(0.8), in: .circle)
+        }
+        .accessibilityLabel("Face tracking overlay")
+        .opacity(controller.isRecording ? 0 : 1)
+        .disabled(controller.isRecording)
     }
 
     /// Opens the library. Hidden while recording, so the grid can't be opened

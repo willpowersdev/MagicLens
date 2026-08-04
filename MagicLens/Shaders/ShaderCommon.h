@@ -25,6 +25,15 @@ struct Uniforms {
     float videoRotated;
     /// 1 for the selfie camera, which wants mirroring.
     float videoMirrored;
+
+    /// Where the tracked face is, in this same uv space. Available to every
+    /// effect, not just the face-aware ones — see faceMask below.
+    float2 faceCenter;
+    /// Its width and height as a fraction of the screen.
+    float2 faceSize;
+    /// 0 when nobody is there, ramping to 1 when someone is. Fade an effect
+    /// with this rather than switching on it, or it will pop.
+    float facePresence;
 };
 
 struct VertexOut {
@@ -75,6 +84,27 @@ static inline float4 sampleVideo(texture2d<float> video,
         : screen;
 
     return video.sample(videoSampler, texCoord);
+}
+
+/// How far inside the tracked face a point is: 1 at the centre, falling to 0 at
+/// the edge of the box and beyond, already scaled by presence.
+///
+/// Effects should reach for this rather than reading faceCenter directly — it
+/// handles the soft edge and the fade in and out, so a face-aware effect can be
+/// a one line change to an existing one.
+static inline float faceMask(float2 uv, constant Uniforms &uniforms, float softness) {
+
+    if (uniforms.facePresence <= 0.0 || uniforms.faceSize.x <= 0.0) {
+        return 0.0;
+    }
+
+    // Distance in units of the face's own radius, so it tracks size as someone
+    // moves closer or further away.
+    float2 radius = max(uniforms.faceSize * 0.5, float2(1e-4));
+    float2 offset = (uv - uniforms.faceCenter) / radius;
+    float distance = length(offset);
+
+    return (1.0 - smoothstep(1.0 - softness, 1.0 + softness, distance)) * uniforms.facePresence;
 }
 
 /// GLSL's `mod` and Metal's `fmod` disagree on negative operands.

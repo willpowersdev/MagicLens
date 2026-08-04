@@ -29,6 +29,11 @@ struct Effect: Identifiable, Hashable {
     static let matrix = Effect(name: "matrix", title: "Inside the Matrix")
     static let crt = Effect(name: "crt", title: "Old TV")
 
+    // Driven by the shared face tracker.
+    static let faceSpotlight = Effect(name: "facespotlight", title: "Spotlight")
+    static let faceHide = Effect(name: "facehide", title: "Hide My Face")
+    static let faceWarp = Effect(name: "facewarp", title: "Big Head")
+
     /// Presentation order in the picker.
     static let all: [Effect] = [
         .edgeHighlights,
@@ -42,6 +47,9 @@ struct Effect: Identifiable, Hashable {
         .antiFisheye,
         .radialBlur,
         .matrix,
-        .crt
+        .crt,
+        .faceSpotlight,
+        .faceHide,
+        .faceWarp
     ]
 }

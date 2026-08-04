@@ -45,6 +45,9 @@ struct MetalCameraView: UIViewRepresentable {
 
     let controller: CameraController
 
+    /// Draws the tracked face box over the effect, for checking detection.
+    var showsFaceOverlay = false
+
     func makeCoordinator() -> Renderer {
         Renderer(controller: controller)
     }
@@ -66,6 +69,7 @@ struct MetalCameraView: UIViewRepresentable {
 
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.setEffect(controller.effect)
+        context.coordinator.showsFaceOverlay = showsFaceOverlay
 
         // Never paused. Pausing stops the view's CADisplayLink, and that display
         // link is what wakes the main run loop each frame — without it an idle

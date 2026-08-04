@@ -20,11 +20,15 @@ final class CameraFeed: NSObject {
     private var captureDevice:AVCaptureDevice?
     private var videoOutput:AVCaptureVideoDataOutput?
     private var audioOutput:AVCaptureAudioDataOutput?
+    private var metadataOutput:AVCaptureMetadataOutput?
     private var cameraPosition: AVCaptureDevice.Position = .front
 
     /// Handed each microphone buffer, on `audioQueue`. Set by the controller so
     /// the feed doesn't need to know the recorder exists.
     var onAudioSample: ((CMSampleBuffer) -> Void)?
+
+    /// The shared face tracker, fed from the session's metadata output.
+    let faces = FaceTracker()
 
     /// AVCaptureSession configuration and start/stop must stay off the main
     /// thread — they block for as long as the hardware takes to come up.
@@ -35,6 +39,8 @@ final class CameraFeed: NSObject {
     private let videoQueue = DispatchQueue(label: "com.ion6.MagicLens.video")
 
     private let audioQueue = DispatchQueue(label: "com.ion6.MagicLens.audio")
+
+    private let metadataQueue = DispatchQueue(label: "com.ion6.MagicLens.metadata")
 
     /// Written on `videoQueue`, read on whatever thread draws. Guarded by
     /// `textureLock`.
@@ -48,6 +54,11 @@ final class CameraFeed: NSObject {
     /// The clock the capture session stamps its sample buffers against. Also
     /// guarded by `textureLock`.
     private var sessionClock: CMClock?
+
+    /// Whether frames arrive in the sensor's landscape orientation, read from
+    /// the frames themselves. The face tracker needs the same answer the shaders
+    /// get, so both are derived from this rather than assumed separately.
+    private var bufferIsLandscape = true
 
     /// Whether the running session is the selfie camera, and so wants mirroring.
     var isFrontFacing: Bool {
@@ -201,6 +212,7 @@ final class CameraFeed: NSObject {
             session.addOutput(output)
             session.sessionPreset = AVCaptureSession.Preset.high
 
+            addFaceDetection(to: session)
             addAudio(to: session)
 
             session.commitConfiguration()
@@ -219,6 +231,33 @@ final class CameraFeed: NSObject {
         } catch let error {
             assertionFailure("error: \(error.localizedDescription)")
         }
+    }
+
+    /// Adds hardware face detection. Must be called inside the session's
+    /// configuration block, on `sessionQueue`.
+    ///
+    /// Quiet on failure, like the microphone: a device or format that can't
+    /// report faces should still show a picture, with face-aware effects simply
+    /// finding nobody.
+    private func addFaceDetection(to session: AVCaptureSession) {
+
+        let output = AVCaptureMetadataOutput()
+
+        guard session.canAddOutput(output) else {
+            return
+        }
+
+        session.addOutput(output)
+
+        // Only available once the output belongs to a session.
+        guard output.availableMetadataObjectTypes.contains(.face) else {
+            session.removeOutput(output)
+            return
+        }
+
+        output.metadataObjectTypes = [.face]
+        output.setMetadataObjectsDelegate(self, queue: metadataQueue)
+        metadataOutput = output
     }
 
     /// Adds the microphone. Must be called inside the session's configuration
@@ -303,8 +342,36 @@ extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate,
         // below recycle it.
         textureLock.lock()
         rgbaTexture = texture
+        bufferIsLandscape = width > height
         textureLock.unlock()
 
         CVMetalTextureCacheFlush(textureCache, 0)
+    }
+}
+
+extension CameraFeed: AVCaptureMetadataOutputObjectsDelegate {
+
+    func metadataOutput(_ output: AVCaptureMetadataOutput,
+                        didOutput metadataObjects: [AVMetadataObject],
+                        from connection: AVCaptureConnection) {
+
+        let detected = metadataObjects.compactMap { $0 as? AVMetadataFaceObject }
+
+        guard !detected.isEmpty else {
+            return
+        }
+
+        // The tracker needs the same orientation facts the shaders are given,
+        // or it will follow the face in a different space to the one it's drawn
+        // in. Both are read from the frame itself rather than assumed.
+        textureLock.lock()
+        let landscape = bufferIsLandscape
+        let mirrored = frontFacing
+        textureLock.unlock()
+
+        faces.update(faces: detected,
+                     bufferIsLandscape: landscape,
+                     mirrored: mirrored,
+                     now: CFAbsoluteTimeGetCurrent())
     }
 }
