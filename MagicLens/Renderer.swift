@@ -396,21 +396,25 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// texture with every contribution at zero: the shader then composites
     /// nothing over the camera, which is the right thing to show while the glow
     /// isn't ready.
-    private func bindEyeGlow(_ glow: EyeGlowRenderer?, to encoder: MTLRenderCommandEncoder) {
+    private func bindEyeGlow(_ glow: EyeGlowRenderer?,
+                             viewResolution: SIMD2<Float>,
+                             to encoder: MTLRenderCommandEncoder) {
 
         let settings = (glow?.configuration ?? EyeGlowConfiguration()).sanitized
 
-        guard let glow,
-              let emission = glow.emission,
-              let small = glow.bloomSmall,
-              let medium = glow.bloomMedium,
-              let large = glow.bloomLarge,
+        bindEyeGlowDebug(glow,
+                         settings: settings,
+                         viewResolution: viewResolution,
+                         to: encoder)
+
+        guard let glow, let emission = glow.emission, let small = glow.bloomSmall,
               let trail = glow.trail else {
 
             var off = EyeCompositeUniforms(coreContribution: 0,
                                            bloomContribution: 0,
                                            trailContribution: 0,
-                                           bloomWeights: SIMD3(repeating: 0))
+                                           bloomWeights: SIMD3(repeating: 0),
+                                           debugTexture: 0)
 
             encoder.setFragmentBytes(&off,
                                      length: MemoryLayout<EyeCompositeUniforms>.stride,
@@ -422,11 +426,19 @@ final class Renderer: NSObject, MTKViewDelegate {
             return
         }
 
+        // A scale the quality level dropped has no texture, so it is weighted
+        // out and the empty one stands in. Weighting alone would be enough, but
+        // the shader still has to have something bound to sample.
+        let weights = SIMD3<Float>(0.80,
+                                   glow.bloomMedium == nil ? 0 : 0.55,
+                                   glow.bloomLarge == nil ? 0 : 0.25)
+
         var composite = EyeCompositeUniforms(
             coreContribution: settings.coreContribution,
             bloomContribution: settings.bloomContribution,
             trailContribution: settings.trailContribution,
-            bloomWeights: SIMD3(0.80, 0.55, 0.25))
+            bloomWeights: weights,
+            debugTexture: settings.debug.fullScreenTexture.rawValue)
 
         encoder.setFragmentBytes(&composite,
                                  length: MemoryLayout<EyeCompositeUniforms>.stride,
@@ -434,9 +446,54 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         encoder.setFragmentTexture(emission, index: 2)
         encoder.setFragmentTexture(small, index: 3)
-        encoder.setFragmentTexture(medium, index: 4)
-        encoder.setFragmentTexture(large, index: 5)
+        encoder.setFragmentTexture(glow.bloomMedium ?? emptyGlowTexture, index: 4)
+        encoder.setFragmentTexture(glow.bloomLarge ?? emptyGlowTexture, index: 5)
         encoder.setFragmentTexture(trail, index: 6)
+    }
+
+    /// The tracked geometry the debug overlay marks up.
+    ///
+    /// Bound whether or not the overlay is on, for the same reason the
+    /// composite uniforms are: the fragment function declares the arguments
+    /// unconditionally.
+    private func bindEyeGlowDebug(_ glow: EyeGlowRenderer?,
+                                  settings: EyeGlowConfiguration,
+                                  viewResolution: SIMD2<Float>,
+                                  to encoder: MTLRenderCommandEncoder) {
+
+        let eyes = settings.debug.drawsOverlay ? (glow?.lastEyes ?? []) : []
+        let left = eyes.first
+        let right = eyes.count > 1 ? eyes[1] : nil
+
+        var points = (left?.contour ?? []) + (right?.contour ?? [])
+
+        var debug = EyeGlowDebugUniforms(
+            leftCenter: left?.center ?? SIMD2(-1, -1),
+            rightCenter: right?.center ?? SIMD2(-1, -1),
+            leftVelocity: left?.velocity ?? SIMD2(0, 0),
+            rightVelocity: right?.velocity ?? SIMD2(0, 0),
+            leftCount: UInt32(left?.contour.count ?? 0),
+            rightCount: UInt32(right?.contour.count ?? 0),
+            showsContours: settings.debug.showEyeContours ? 1 : 0,
+            showsCenters: settings.debug.showEyeCenters ? 1 : 0,
+            showsVelocity: settings.debug.showVelocityVectors ? 1 : 0,
+            // Marks stay an even thickness on screen rather than stretching
+            // with whichever way the view is longer.
+            pixelsPerUV: viewResolution)
+
+        encoder.setFragmentBytes(&debug,
+                                 length: MemoryLayout<EyeGlowDebugUniforms>.stride,
+                                 index: 4)
+
+        // setFragmentBytes rejects a zero length, and the shader reads nothing
+        // when both counts are zero.
+        if points.isEmpty {
+            points = [SIMD2(0, 0)]
+        }
+
+        encoder.setFragmentBytes(&points,
+                                 length: MemoryLayout<SIMD2<Float>>.stride * points.count,
+                                 index: 5)
     }
 
     /// Binds the mouth — segmented mask where there is one, inner-lip contour
@@ -555,6 +612,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         // only one encoder on a command buffer at a time.
         var glowReady = false
         if currentEffect == .eyeGlow, let eyeGlow {
+            // The tracker holds the settings — it is the one thing both the
+            // Vision queue and this one already reach, and its accessor is
+            // synchronised. Copied per frame rather than observed, which keeps
+            // the render loop off the observation machinery.
+            eyeGlow.configuration = feed.faces.eyeGlowSettings
+
             glowReady = eyeGlow.encode(commandBuffer: commandBuffer,
                                        face: face,
                                        drawableSize: view.drawableSize,
@@ -606,7 +669,9 @@ final class Renderer: NSObject, MTKViewDelegate {
             // fragment function declares but nothing filled in is a hard
             // validation failure, not a black frame.
             if currentEffect == .eyeGlow {
-                bindEyeGlow(glowReady ? eyeGlow : nil, to: encoder)
+                bindEyeGlow(glowReady ? eyeGlow : nil,
+                            viewResolution: viewResolution,
+                            to: encoder)
             }
         } else {
             encoder.setRenderPipelineState(gradientPipelineState)

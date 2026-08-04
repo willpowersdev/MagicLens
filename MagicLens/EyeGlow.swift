@@ -6,6 +6,107 @@
 import CoreGraphics
 import simd
 
+/// How much of the pipeline runs.
+///
+/// The glow's cost is almost entirely blur — three Gaussians over the emission
+/// plus the trail's own — so the levels trade bloom scales and trail resolution
+/// rather than anything to do with the tracking, which costs the same either
+/// way and is shared with the other face effects regardless.
+enum EyeGlowQuality: String, CaseIterable, Identifiable, Sendable {
+
+    case low
+    case medium
+    case high
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .low: "Low"
+        case .medium: "Medium"
+        case .high: "High"
+        }
+    }
+
+    /// How many of the three bloom scales are blurred and composited. Dropping
+    /// the widest first costs the least: it is the softest and the one the eye
+    /// is least able to place.
+    var bloomScales: Int {
+        switch self {
+        case .low: 1
+        case .medium: 2
+        case .high: 3
+        }
+    }
+
+    /// The trail's size as a divisor of the drawable. Halving it again quarters
+    /// the work of every trail pass.
+    var trailDivisor: Int {
+        switch self {
+        case .low: 4
+        case .medium, .high: 2
+        }
+    }
+
+    /// The directional streak is a twelve-tap gather over the whole trail, and
+    /// the first thing worth dropping when there is no headroom.
+    var usesDirectionalBlur: Bool {
+        self != .low
+    }
+
+    /// Multiplies the trail's blur. The extra softening is what makes a fast
+    /// movement read as one continuous streak rather than a run of stamps.
+    var trailDiffusion: Float {
+        switch self {
+        case .low, .medium: 1.0
+        case .high: 1.8
+        }
+    }
+}
+
+/// Ways of looking at the glow while it is being worked on.
+///
+/// Every one of these exists because the effect can fail while looking
+/// deliberate: a trail smeared the wrong way, a texture sampled upside down, or
+/// contours tracked somewhere other than where they are drawn all render
+/// perfectly happily.
+struct EyeGlowDebugOptions: Sendable, Equatable {
+
+    var showEyeContours = false
+    var showEyeCenters = false
+    var showVelocityVectors = false
+
+    var showEmissionTexture = false
+    var showBloomTexture = false
+    var showTrailTexture = false
+
+    /// Which intermediate to show full screen, if any. They are separate
+    /// switches in the interface but only one image can be on screen, so the
+    /// sharpest wins — it is the one whose geometry is easiest to read.
+    var fullScreenTexture: EyeGlowDebugTexture {
+        if showEmissionTexture { return .emission }
+        if showBloomTexture { return .bloom }
+        if showTrailTexture { return .trail }
+        return .none
+    }
+
+    var drawsOverlay: Bool {
+        showEyeContours || showEyeCenters || showVelocityVectors
+    }
+
+    var isActive: Bool {
+        drawsOverlay || fullScreenTexture != .none
+    }
+}
+
+/// Mirrors the selector the composite shader switches on.
+enum EyeGlowDebugTexture: UInt32, Sendable, Equatable {
+    case none = 0
+    case emission = 1
+    case bloom = 2
+    case trail = 3
+}
+
 /// Tuning for the eye glow.
 ///
 /// Deliberately free of Metal and Vision so the timing and geometry can be
@@ -14,12 +115,15 @@ import simd
 /// GPU or a camera to check.
 struct EyeGlowConfiguration: Sendable, Equatable {
 
-    var glowColor = SIMD3<Float>(0.28, 0.76, 1.0)
+    /// Periwinkle rather than cyan: the centre of the eye burns out to white on
+    /// its own — see the whitening in `eyeGlowFragment` — so this is the colour
+    /// of the falloff and the bloom around it, not of the core.
+    var glowColor = SIMD3<Float>(0.55, 0.52, 1.0)
 
-    var eyeIntensity: Float = 3.0
-    var coreContribution: Float = 0.90
-    var bloomContribution: Float = 0.75
-    var trailContribution: Float = 0.55
+    var eyeIntensity: Float = 4.5
+    var coreContribution: Float = 1.0
+    var bloomContribution: Float = 1.0
+    var trailContribution: Float = 0.70
 
     /// Blur radii for the three bloom scales, in pixels at each one's own size.
     var bloomSigmaSmall: Float = 4.0
@@ -46,8 +150,12 @@ struct EyeGlowConfiguration: Sendable, Equatable {
     var minimumEyeOpenness: Float = 0.08
     var fullEyeOpenness: Float = 0.28
 
-    var maximumTrailLengthUV: Float = 0.05
+    var maximumTrailLengthUV: Float = 0.08
     var velocityTrailScale: Float = 2.5
+
+    var quality = EyeGlowQuality.high
+
+    var debug = EyeGlowDebugOptions()
 
     /// How long tracking may be absent before the trail is cleared outright
     /// rather than left to decay.

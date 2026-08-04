@@ -16,6 +16,9 @@ struct Effect: Identifiable, Hashable {
 
     var fragmentFunction: String { "fragment_\(name)" }
 
+    /// Whether the picker offers a tuning panel for this effect.
+    var hasSettings: Bool { self == .eyeGlow }
+
     static let edgeHighlights = Effect(name: "edgehighlights", title: "Edge Highlights")
     static let infrared = Effect(name: "infrared", title: "Infrared")
     static let points = Effect(name: "points", title: "Pointillize")

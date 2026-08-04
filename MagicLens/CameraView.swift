@@ -10,6 +10,7 @@ struct CameraView: View {
     @State private var controller = CameraController()
     @State private var isShowingPicker = false
     @State private var isShowingRecordings = false
+    @State private var isShowingEyeGlowSettings = false
     @State private var showsFaceOverlay = false
 
     @Environment(\.scenePhase) private var scenePhase
@@ -50,11 +51,30 @@ struct CameraView: View {
             // that path, so the fix is to stay off it: an overlay animates
             // through SwiftUI alone and appears immediately.
             if isShowingPicker {
-                FilterPicker(selection: $controller.effect) {
+                FilterPicker(selection: $controller.effect, dismiss: {
                     withAnimation(.easeOut(duration: 0.25)) {
                         isShowingPicker = false
                     }
+                }, showSettings: { _ in
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        isShowingPicker = false
+                        isShowingEyeGlowSettings = true
+                    }
+                })
+                .transition(.move(edge: .bottom))
+                .zIndex(1)
+            }
+
+            if isShowingEyeGlowSettings {
+                EyeGlowSettingsView(configuration: $controller.eyeGlow) {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        isShowingEyeGlowSettings = false
+                    }
                 }
+                // Half height, unlike the other two: the whole point is to see
+                // the effect change as a slider moves, which needs the face to
+                // stay on screen.
+                .frame(maxHeight: 420)
                 .transition(.move(edge: .bottom))
                 .zIndex(1)
             }

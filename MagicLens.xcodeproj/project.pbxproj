@@ -105,6 +105,8 @@
 		EB0F00000000000000000002 /* EyeGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000001 /* EyeGlow.swift */; };
 		EB0F00000000000000000003 /* EyeGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000001 /* EyeGlow.swift */; };
 		EB0F00000000000000000005 /* EyeGlowRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000004 /* EyeGlowRenderer.swift */; };
+		EB0F0000000000000000000F /* EyeGlowSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F0000000000000000000E /* EyeGlowSettingsView.swift */; };
+		EB0F00000000000000000010 /* EyeGlowSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F0000000000000000000E /* EyeGlowSettingsView.swift */; };
 		EB0F00000000000000000006 /* EyeGlowRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000004 /* EyeGlowRenderer.swift */; };
 		EB0F00000000000000000008 /* EyeGlow.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000007 /* EyeGlow.metal */; };
 		EB0F00000000000000000009 /* EyeGlow.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000007 /* EyeGlow.metal */; };
@@ -190,6 +192,7 @@
 		EB00AC000000000000000031 /* MagicLensMac.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; path = MagicLensMac.entitlements; sourceTree = "<group>"; };
 		EB0F00000000000000000001 /* EyeGlow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EyeGlow.swift; sourceTree = "<group>"; };
 		EB0F00000000000000000004 /* EyeGlowRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EyeGlowRenderer.swift; sourceTree = "<group>"; };
+		EB0F0000000000000000000E /* EyeGlowSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EyeGlowSettingsView.swift; sourceTree = "<group>"; };
 		EB0F00000000000000000007 /* EyeGlow.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = EyeGlow.metal; sourceTree = "<group>"; };
 		EB1F00000000000000000001 /* EyeGlowTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EyeGlowTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -267,6 +270,7 @@
 				EB00AC000000000000000001 /* Platform.swift */,
 				EB0F00000000000000000001 /* EyeGlow.swift */,
 				EB0F00000000000000000004 /* EyeGlowRenderer.swift */,
+				EB0F0000000000000000000E /* EyeGlowSettingsView.swift */,
 				CDCB7706263C012700709455 /* CameraFeed.swift */,
 				CDCB76D5263C00D400709455 /* Info.plist */,
 				CDCB7716263C01B900709455 /* Assets.xcassets */,
@@ -542,6 +546,7 @@
 			files = (
 				EB0F00000000000000000008 /* EyeGlow.metal in Sources */,
 				EB0F00000000000000000005 /* EyeGlowRenderer.swift in Sources */,
+				EB0F0000000000000000000F /* EyeGlowSettingsView.swift in Sources */,
 				EB0F00000000000000000002 /* EyeGlow.swift in Sources */,
 				EB0001000000000000000002 /* Gradient.metal in Sources */,
 				EB0000000000000000000003 /* Common.metal in Sources */,
@@ -602,6 +607,7 @@
 			files = (
 				EB0F00000000000000000009 /* EyeGlow.metal in Sources */,
 				EB0F00000000000000000006 /* EyeGlowRenderer.swift in Sources */,
+				EB0F00000000000000000010 /* EyeGlowSettingsView.swift in Sources */,
 				EB0F00000000000000000003 /* EyeGlow.swift in Sources */,
 				EB00AC000000000000000003 /* Gradient.metal in Sources */,
 				EB00AC000000000000000004 /* Common.metal in Sources */,

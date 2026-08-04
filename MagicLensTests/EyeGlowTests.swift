@@ -4,6 +4,7 @@
 //
 
 import XCTest
+import Metal
 import simd
 @testable import MagicLens
 
@@ -260,5 +261,377 @@ final class EyeGlowTests: XCTestCase {
         var configuration = EyeGlowConfiguration()
         configuration.trailDecayAt60FPS = 1
         XCTAssertLessThan(configuration.sanitized.trailDecayAt60FPS, 1)
+    }
+
+    /// Quality and the debug switches are settings, not tuning, and sanitising
+    /// clamps values rather than resetting choices.
+    func testSanitisingLeavesQualityAndDebugAlone() {
+        var configuration = EyeGlowConfiguration()
+        configuration.quality = .low
+        configuration.debug.showTrailTexture = true
+        configuration.eyeIntensity = 500
+
+        let clean = configuration.sanitized
+
+        XCTAssertEqual(clean.quality, .low)
+        XCTAssertTrue(clean.debug.showTrailTexture)
+        XCTAssertLessThanOrEqual(clean.eyeIntensity, 20)
+    }
+
+    // MARK: - Quality
+
+    /// The levels have to actually differ, and in the direction their names
+    /// claim — a level that costs the same as the one above it is just a
+    /// misleading label.
+    func testQualityLevelsDescendInCost() {
+        let levels = EyeGlowQuality.allCases
+
+        XCTAssertEqual(levels, [.low, .medium, .high])
+
+        for (cheaper, dearer) in zip(levels, levels.dropFirst()) {
+            XCTAssertLessThanOrEqual(cheaper.bloomScales, dearer.bloomScales)
+            XCTAssertGreaterThanOrEqual(cheaper.trailDivisor, dearer.trailDivisor)
+            XCTAssertLessThanOrEqual(cheaper.trailDiffusion, dearer.trailDiffusion)
+        }
+    }
+
+    func testTheLowestLevelMatchesItsSpecifiedMapping() {
+        XCTAssertEqual(EyeGlowQuality.low.bloomScales, 1)
+        XCTAssertEqual(EyeGlowQuality.low.trailDivisor, 4)
+        XCTAssertFalse(EyeGlowQuality.low.usesDirectionalBlur)
+    }
+
+    func testTheHighestLevelMatchesItsSpecifiedMapping() {
+        XCTAssertEqual(EyeGlowQuality.high.bloomScales, 3)
+        XCTAssertEqual(EyeGlowQuality.high.trailDivisor, 2)
+        XCTAssertTrue(EyeGlowQuality.high.usesDirectionalBlur)
+        XCTAssertGreaterThan(EyeGlowQuality.high.trailDiffusion, 1)
+    }
+
+    /// Every level has to leave something to composite. One with no bloom
+    /// scales would bind nothing but the empty texture and show a bare core.
+    func testEveryLevelKeepsAtLeastOneBloomScaleAndARealTrail() {
+        for quality in EyeGlowQuality.allCases {
+            XCTAssertGreaterThanOrEqual(quality.bloomScales, 1)
+            XCTAssertLessThanOrEqual(quality.bloomScales, 3)
+            XCTAssertGreaterThan(quality.trailDivisor, 0)
+        }
+    }
+
+    // MARK: - Debug options
+
+    func testNothingIsShownByDefault() {
+        let debug = EyeGlowDebugOptions()
+
+        XCTAssertEqual(debug.fullScreenTexture, .none)
+        XCTAssertFalse(debug.drawsOverlay)
+        XCTAssertFalse(debug.isActive)
+    }
+
+    /// Only one image can be full screen. Two switches on has to resolve to a
+    /// single answer rather than whichever the shader happens to test first.
+    func testTwoTextureSwitchesResolveToOne() {
+        var debug = EyeGlowDebugOptions()
+        debug.showBloomTexture = true
+        debug.showTrailTexture = true
+
+        XCTAssertEqual(debug.fullScreenTexture, .bloom)
+
+        debug.showEmissionTexture = true
+        XCTAssertEqual(debug.fullScreenTexture, .emission)
+    }
+
+    func testTheOverlayIsIndependentOfTheTextureViews() {
+        var debug = EyeGlowDebugOptions()
+        debug.showEyeContours = true
+
+        XCTAssertTrue(debug.drawsOverlay)
+        XCTAssertTrue(debug.isActive)
+        XCTAssertEqual(debug.fullScreenTexture, .none,
+                       "the overlay draws over whatever is being shown")
+    }
+
+    /// The raw values are what the shader switches on, so they are part of the
+    /// contract with it rather than an implementation detail.
+    func testTextureSelectorsMatchTheShader() {
+        XCTAssertEqual(EyeGlowDebugTexture.none.rawValue, 0)
+        XCTAssertEqual(EyeGlowDebugTexture.emission.rawValue, 1)
+        XCTAssertEqual(EyeGlowDebugTexture.bloom.rawValue, 2)
+        XCTAssertEqual(EyeGlowDebugTexture.trail.rawValue, 3)
+    }
+
+    // MARK: - Where the glow actually lands
+
+    /// The one thing arithmetic can't settle: whether an eye at a given uv is
+    /// drawn where the composite goes looking for it.
+    ///
+    /// The emission is rendered as geometry in clip space and sampled back as a
+    /// texture, and those two have opposite ideas about which way y runs. Get
+    /// the reconciliation wrong and the glow appears somewhere else on the face
+    /// — which is a plausible enough picture that nothing about it reads as a
+    /// bug. So this renders a single eye at a deliberately lopsided position
+    /// and reads the texture back to find out where it went.
+    func testTheEmissionLandsWhereTheCompositeSamplesIt() throws {
+
+        let glowUV = try renderOneEye(at: SIMD2(0.25, 0.80))
+
+        // The composite samples `float2(uv.x, 1.0 - uv.y)`, so an eye at
+        // uv (0.25, 0.80) has to be found in the texture at (0.25, 0.20).
+        XCTAssertEqual(glowUV.x, 0.25, accuracy: 0.04,
+                       "the glow is offset horizontally from the eye")
+        XCTAssertEqual(glowUV.y, 0.20, accuracy: 0.04,
+                       "the glow is offset vertically from the eye")
+    }
+
+    /// Two eyes at opposite corners, to catch a transform that happens to be
+    /// symmetric about the centre and so looks right for one point.
+    func testAnEyeInEachCornerStaysInItsOwnCorner() throws {
+        let lowLeft = try renderOneEye(at: SIMD2(0.20, 0.20))
+        let highRight = try renderOneEye(at: SIMD2(0.80, 0.80))
+
+        XCTAssertEqual(lowLeft.x, 0.20, accuracy: 0.04)
+        XCTAssertEqual(lowLeft.y, 0.80, accuracy: 0.04)
+
+        XCTAssertEqual(highRight.x, 0.80, accuracy: 0.04)
+        XCTAssertEqual(highRight.y, 0.20, accuracy: 0.04)
+    }
+
+    /// Every stage is sampled with normalised coordinates, so a smaller texture
+    /// has to hold the *whole* frame scaled down rather than a crop of it at
+    /// full pixel density.
+    ///
+    /// This is not hypothetical. A Gaussian blur preserves size: encoding one
+    /// straight from the full-resolution emission into the half-resolution
+    /// bloom blurred the top-left quadrant at 1:1 pixels, and sampling that
+    /// back stretched the quadrant over the frame and put every eye at twice
+    /// its distance from the corner. On screen it read as a second, blurrier
+    /// pair of eyes down and to the right of the real ones.
+    func testEveryBloomScaleHoldsTheWholeFrame() throws {
+        let eye = SIMD2<Float>(0.30, 0.75)
+        let expected = SIMD2<Float>(0.30, 0.25)
+
+        // Rendered large, because the widest scale is an eighth of it and the
+        // sigmas are in pixels. At a toy size that scale is smaller than its
+        // own blur kernel, and edge clamping drags the centroid to the middle
+        // — which would fail the assertion for reasons that say nothing about
+        // the app.
+        for stage in [EyeGlowStage.bloomSmall, .bloomMedium, .bloomLarge] {
+            let found = try renderOneEye(at: eye, reading: stage, side: 1024)
+
+            XCTAssertEqual(found.x, expected.x, accuracy: 0.06,
+                           "\(stage) is not a downscale of the whole frame")
+            XCTAssertEqual(found.y, expected.y, accuracy: 0.06,
+                           "\(stage) is not a downscale of the whole frame")
+        }
+    }
+
+    /// The glow should fill the eye rather than sit as a band inside it.
+    ///
+    /// Measured down the middle of the eye, where an almond is at its tallest.
+    /// A flat vertical squash reached about half the opening's height here,
+    /// which read as a slot rather than an eye.
+    func testTheGlowFillsTheHeightOfTheEye() throws {
+        let profile = try renderEyeProfile(halfWidth: 0.06, halfHeight: 0.03, side: 1024)
+
+        XCTAssertGreaterThan(profile.litFraction, 0.75,
+                             "the glow covers only \(profile.litFraction) of the eye's height")
+    }
+
+    /// And taper, rather than being a rectangle: the corners have to close.
+    func testTheGlowTapersTowardsTheCorners() throws {
+        let profile = try renderEyeProfile(halfWidth: 0.06, halfHeight: 0.03, side: 1024)
+
+        XCTAssertLessThan(Float(profile.cornerHeight), Float(profile.centreHeight) * 0.7,
+                          "the glow is as tall at the corners as in the middle")
+        XCTAssertGreaterThan(profile.cornerHeight, 0,
+                             "the corners are empty rather than tapered")
+    }
+
+    /// Which intermediate the harness reads back.
+    enum EyeGlowStage {
+        case emission
+        case bloomSmall
+        case bloomMedium
+        case bloomLarge
+    }
+
+    // MARK: - GPU harness
+
+
+    /// Renders one eye centred at `center` and returns where the brightest
+    /// texel ended up, in the normalised coordinates the composite samples
+    /// with — origin top left, as texture sampling counts.
+    /// How tall the lit region is at the middle of the eye and near its corner,
+    /// in texels, alongside how much of the eye's own height the middle covers.
+    private struct EyeProfile {
+        var centreHeight: Int
+        var cornerHeight: Int
+        var litFraction: Float
+    }
+
+    private func renderEyeProfile(halfWidth: Float,
+                                  halfHeight: Float,
+                                  side: Int) throws -> EyeProfile {
+
+        let centre = SIMD2<Float>(0.5, 0.5)
+        let texels = try renderEyeTexels(at: centre,
+                                         halfWidth: halfWidth,
+                                         halfHeight: halfHeight,
+                                         reading: .emission,
+                                         side: side)
+
+        var peak: Float = 0
+        for value in texels {
+            peak = max(peak, value)
+        }
+
+        XCTAssertGreaterThan(peak, 0.01, "nothing was drawn at all")
+        let threshold = peak * 0.1
+
+        func litHeight(atColumn column: Int) -> Int {
+            (0..<side).count { row in texels[row * side + column] > threshold }
+        }
+
+        let middle = Int(centre.x * Float(side))
+        // Three quarters of the way out towards the corner.
+        let nearCorner = Int((centre.x + halfWidth * 0.75) * Float(side))
+
+        let centreHeight = litHeight(atColumn: middle)
+        let eyeHeight = 2 * halfHeight * Float(side)
+
+        return EyeProfile(centreHeight: centreHeight,
+                          cornerHeight: litHeight(atColumn: nearCorner),
+                          litFraction: Float(centreHeight) / eyeHeight)
+    }
+
+    /// Renders one eye and reads a stage back as per-texel luminance, laid out
+    /// row-major from the top left — the same way texture sampling counts.
+    private func renderEyeTexels(at center: SIMD2<Float>,
+                                 halfWidth: Float = 0.06,
+                                 halfHeight: Float = 0.03,
+                                 reading stage: EyeGlowStage = .emission,
+                                 side: Int = 256) throws -> [Float] {
+
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let queue = device.makeCommandQueue() else {
+            throw XCTSkip("no Metal device")
+        }
+
+        let library = try device.makeDefaultLibrary(bundle: Bundle(for: EyeGlowRenderer.self))
+
+        guard let glow = EyeGlowRenderer(device: device, library: library) else {
+            throw XCTSkip("the glow's pipelines wouldn't build")
+        }
+
+        var face = TrackedFace.none
+        face.eyePresence = 1
+        face.leftOpenness = 1
+        // Only the left, which also exercises one eye failing without taking
+        // the other with it.
+        face.leftEyeShape = [
+            center + SIMD2(-halfWidth, 0),
+            center + SIMD2(0, halfHeight),
+            center + SIMD2(halfWidth, 0),
+            center + SIMD2(0, -halfHeight)
+        ]
+
+        guard let commandBuffer = queue.makeCommandBuffer() else {
+            throw XCTSkip("no command buffer")
+        }
+
+        XCTAssertTrue(glow.encode(commandBuffer: commandBuffer,
+                                  face: face,
+                                  drawableSize: CGSize(width: side, height: side),
+                                  scale: SIMD2(1, 1),
+                                  elapsed: 1.0 / 60.0,
+                                  now: 1))
+
+        let texture: MTLTexture
+
+        switch stage {
+        case .emission: texture = try XCTUnwrap(glow.emission)
+        case .bloomSmall: texture = try XCTUnwrap(glow.bloomSmall)
+        case .bloomMedium: texture = try XCTUnwrap(glow.bloomMedium)
+        case .bloomLarge: texture = try XCTUnwrap(glow.bloomLarge)
+        }
+
+        let width = texture.width
+        let height = texture.height
+
+        // Private storage, so it has to be copied somewhere readable.
+        let bytesPerRow = width * 8
+        let readback = try XCTUnwrap(device.makeBuffer(length: bytesPerRow * height,
+                                                        options: .storageModeShared))
+
+        guard let blit = commandBuffer.makeBlitCommandEncoder() else {
+            throw XCTSkip("no blit encoder")
+        }
+
+        blit.copy(from: texture,
+                  sourceSlice: 0,
+                  sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: width, height: height, depth: 1),
+                  to: readback,
+                  destinationOffset: 0,
+                  destinationBytesPerRow: bytesPerRow,
+                  destinationBytesPerImage: bytesPerRow * height)
+        blit.endEncoding()
+
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+
+        let raw = readback.contents().bindMemory(to: Float16.self,
+                                                  capacity: width * height * 4)
+
+        var luminance = [Float](repeating: 0, count: width * height)
+
+        for index in 0..<(width * height) {
+            let channel = index * 4
+            luminance[index] = Float(raw[channel]) + Float(raw[channel + 1])
+                             + Float(raw[channel + 2])
+        }
+
+        return luminance
+    }
+
+    /// Where the lit region's centre of mass is, in the normalised coordinates
+    /// the composite samples with.
+    ///
+    /// The centroid rather than the single brightest texel: a heavily blurred
+    /// scale has a broad plateau, and which texel within it happens to win is
+    /// noise.
+    private func renderOneEye(at center: SIMD2<Float>,
+                              reading stage: EyeGlowStage = .emission,
+                              side: Int = 256) throws -> SIMD2<Float> {
+
+        let texels = try renderEyeTexels(at: center, reading: stage, side: side)
+
+        let width = Int(Double(texels.count).squareRoot().rounded())
+        let height = width
+
+        var weight: Float = 0
+        var total = SIMD2<Float>(0, 0)
+        var peak: Float = 0
+
+        for row in 0..<height {
+            for column in 0..<width {
+                let value = texels[row * width + column]
+                peak = max(peak, value)
+
+                guard value > 0.001 else {
+                    continue
+                }
+
+                weight += value
+                total += SIMD2(Float(column) + 0.5, Float(row) + 0.5) * value
+            }
+        }
+
+        XCTAssertGreaterThan(peak, 0.01, "nothing was drawn at all")
+
+        let centre = total / max(weight, 1e-6)
+
+        return SIMD2(centre.x / Float(width), centre.y / Float(height))
     }
 }

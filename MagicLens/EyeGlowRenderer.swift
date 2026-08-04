@@ -36,6 +36,11 @@ final class EyeGlowRenderer {
 
     private var size = CGSize.zero
 
+    /// What the current textures were built for. Quality changes their sizes
+    /// and which of them exist at all, so it belongs alongside the size in
+    /// deciding when to rebuild.
+    private var builtQuality: EyeGlowQuality?
+
     private(set) var emission: MTLTexture?
     private(set) var bloomSmall: MTLTexture?
     private(set) var bloomMedium: MTLTexture?
@@ -50,10 +55,31 @@ final class EyeGlowRenderer {
     /// The one the composite should sample.
     var trail: MTLTexture? { readingFromA ? trailA : trailB }
 
+    /// What was last drawn, in view space, for the debug overlay to mark up.
+    /// Kept here rather than recomputed in the renderer so the overlay shows
+    /// the geometry the glow actually used, including its gating.
+    private(set) var lastEyes: [TrackedEye] = []
+
+    /// Each bloom scale's input, at that scale's own size.
+    ///
+    /// A Gaussian blur is size-preserving: encoding one from a large texture
+    /// into a small one blurs the top-left corner of the source at 1:1 pixels
+    /// rather than shrinking the whole image into it. Sampling that with
+    /// normalised coordinates then stretches the corner across the frame and
+    /// doubles every position. So the downsample is a separate step, and these
+    /// are what it writes into.
+    private var bloomScratchSmall: MTLTexture?
+    private var bloomScratchMedium: MTLTexture?
+    private var bloomScratchLarge: MTLTexture?
+
     private var blurSmall: MPSImageGaussianBlur?
     private var blurMedium: MPSImageGaussianBlur?
     private var blurLarge: MPSImageGaussianBlur?
     private var blurTrail: MPSImageGaussianBlur?
+
+    /// Resamples between the bloom scales. With no scale transform set it fits
+    /// the source to the destination, which is exactly the downsample wanted.
+    private lazy var downsample = MPSImageBilinearScale(device: device)
 
     private var lastSeen: CFAbsoluteTime = 0
     private var needsClear = true
@@ -122,28 +148,47 @@ final class EyeGlowRenderer {
         return device.makeTexture(descriptor: descriptor)
     }
 
-    private func resizeIfNeeded(to newSize: CGSize) {
-        guard newSize != size, newSize.width > 0, newSize.height > 0 else {
+    private func resizeIfNeeded(to newSize: CGSize, quality: EyeGlowQuality) {
+        guard newSize.width > 0, newSize.height > 0,
+              newSize != size || quality != builtQuality else {
             return
         }
 
         size = newSize
+        builtQuality = quality
 
         let width = Int(newSize.width)
         let height = Int(newSize.height)
 
+        let trailWidth = width / quality.trailDivisor
+        let trailHeight = height / quality.trailDivisor
+
         emission = makeTexture(width: width, height: height)
+
+        // Only the scales this level composites. The rest stay nil and the
+        // composite binds the empty texture in their place, so nothing pays for
+        // a blur whose result is weighted to zero.
         bloomSmall = makeTexture(width: width / 2, height: height / 2)
-        bloomMedium = makeTexture(width: width / 4, height: height / 4)
-        bloomLarge = makeTexture(width: width / 8, height: height / 8)
-        trailA = makeTexture(width: width / 2, height: height / 2)
-        trailB = makeTexture(width: width / 2, height: height / 2)
-        trailScratch = makeTexture(width: width / 2, height: height / 2)
+        bloomScratchSmall = makeTexture(width: width / 2, height: height / 2)
+
+        bloomMedium = quality.bloomScales >= 2 ? makeTexture(width: width / 4, height: height / 4) : nil
+        bloomScratchMedium = bloomMedium == nil ? nil : makeTexture(width: width / 4, height: height / 4)
+
+        bloomLarge = quality.bloomScales >= 3 ? makeTexture(width: width / 8, height: height / 8) : nil
+        bloomScratchLarge = bloomLarge == nil ? nil : makeTexture(width: width / 8, height: height / 8)
+
+        trailA = makeTexture(width: trailWidth, height: trailHeight)
+        trailB = makeTexture(width: trailWidth, height: trailHeight)
+        trailScratch = quality.usesDirectionalBlur
+            ? makeTexture(width: trailWidth, height: trailHeight)
+            : nil
 
         blurSmall = MPSImageGaussianBlur(device: device, sigma: configuration.bloomSigmaSmall)
         blurMedium = MPSImageGaussianBlur(device: device, sigma: configuration.bloomSigmaMedium)
         blurLarge = MPSImageGaussianBlur(device: device, sigma: configuration.bloomSigmaLarge)
-        blurTrail = MPSImageGaussianBlur(device: device, sigma: configuration.trailBlurSigma)
+        blurTrail = MPSImageGaussianBlur(
+            device: device,
+            sigma: configuration.trailBlurSigma * quality.trailDiffusion)
 
         for blur in [blurSmall, blurMedium, blurLarge, blurTrail] {
             blur?.edgeMode = .clamp
@@ -165,22 +210,27 @@ final class EyeGlowRenderer {
                 elapsed: Double,
                 now: CFAbsoluteTime) -> Bool {
 
-        resizeIfNeeded(to: drawableSize)
+        let settings = configuration.sanitized
 
-        guard let emission, let bloomSmall, let bloomMedium, let bloomLarge,
-              let trailA, let trailB, let trailScratch else {
+        resizeIfNeeded(to: drawableSize, quality: settings.quality)
+
+        // Only what every level needs. The wider bloom scales and the streak
+        // scratch are absent by design below high, and their passes are skipped
+        // rather than being a failure to encode.
+        guard let emission, let bloomSmall, let trailA, let trailB else {
             return false
         }
 
-        let settings = configuration.sanitized
-
         if needsClear {
             clear([emission, bloomSmall, bloomMedium, bloomLarge,
-                   trailA, trailB, trailScratch], commandBuffer: commandBuffer)
+                   bloomScratchSmall, bloomScratchMedium, bloomScratchLarge,
+                   trailA, trailB, trailScratch].compactMap { $0 },
+                  commandBuffer: commandBuffer)
             needsClear = false
         }
 
         let eyes = preparedEyes(from: face, scale: scale, settings: settings)
+        lastEyes = eyes
 
         if !eyes.isEmpty {
             lastSeen = now
@@ -191,7 +241,7 @@ final class EyeGlowRenderer {
         }
 
         encodeEmission(eyes: eyes, settings: settings, commandBuffer: commandBuffer)
-        encodeBloom(commandBuffer: commandBuffer)
+        encodeBloom(quality: settings.quality, commandBuffer: commandBuffer)
         encodeTrail(eyes: eyes,
                     settings: settings,
                     elapsed: elapsed,
@@ -319,17 +369,50 @@ final class EyeGlowRenderer {
 
     /// Only the emission is blurred. Blurring the camera frame would be both
     /// far more expensive and wrong — the picture should stay sharp.
-    private func encodeBloom(commandBuffer: MTLCommandBuffer) {
-        guard let emission, let bloomSmall, let bloomMedium, let bloomLarge else {
+    ///
+    /// Each scale blurs the one before it rather than the emission again, so the
+    /// widest is reached by three cheap passes instead of one enormous kernel.
+    /// That also means a level which drops a scale drops everything beyond it.
+    private func encodeBloom(quality: EyeGlowQuality, commandBuffer: MTLCommandBuffer) {
+        guard let emission, let bloomSmall, let bloomScratchSmall else {
             return
         }
 
-        blurSmall?.encode(commandBuffer: commandBuffer,
-                          sourceTexture: emission, destinationTexture: bloomSmall)
-        blurMedium?.encode(commandBuffer: commandBuffer,
-                           sourceTexture: bloomSmall, destinationTexture: bloomMedium)
-        blurLarge?.encode(commandBuffer: commandBuffer,
-                          sourceTexture: bloomMedium, destinationTexture: bloomLarge)
+        scaleThenBlur(from: emission, into: bloomSmall, via: bloomScratchSmall,
+                      blur: blurSmall, commandBuffer: commandBuffer)
+
+        guard let bloomMedium, let bloomScratchMedium else {
+            return
+        }
+
+        scaleThenBlur(from: bloomSmall, into: bloomMedium, via: bloomScratchMedium,
+                      blur: blurMedium, commandBuffer: commandBuffer)
+
+        guard let bloomLarge, let bloomScratchLarge else {
+            return
+        }
+
+        scaleThenBlur(from: bloomMedium, into: bloomLarge, via: bloomScratchLarge,
+                      blur: blurLarge, commandBuffer: commandBuffer)
+    }
+
+    /// Shrinks `source` to `scratch`'s size and blurs the result into
+    /// `destination`. The two steps have to be separate: the blur preserves
+    /// size, so it can't do the shrinking, and it can't read and write one
+    /// texture either.
+    private func scaleThenBlur(from source: MTLTexture,
+                               into destination: MTLTexture,
+                               via scratch: MTLTexture,
+                               blur: MPSImageGaussianBlur?,
+                               commandBuffer: MTLCommandBuffer) {
+
+        downsample.encode(commandBuffer: commandBuffer,
+                          sourceTexture: source,
+                          destinationTexture: scratch)
+
+        blur?.encode(commandBuffer: commandBuffer,
+                     sourceTexture: scratch,
+                     destinationTexture: destination)
     }
 
     private func encodeTrail(eyes: [TrackedEye],
@@ -337,7 +420,7 @@ final class EyeGlowRenderer {
                              elapsed: Double,
                              commandBuffer: MTLCommandBuffer) {
 
-        guard let bloomSmall, let trailA, let trailB, let trailScratch,
+        guard let bloomSmall, let trailA, let trailB,
               let encoder = commandBuffer.makeComputeCommandEncoder() else {
             return
         }
@@ -363,11 +446,13 @@ final class EyeGlowRenderer {
                          index: 0)
         dispatch(encoder, pipeline: trailPipeline, over: next)
 
-        // Smear along the motion, when there is enough of it to matter.
+        // Smear along the motion, when there is enough of it to matter and the
+        // quality level has a scratch texture to do it in.
         let velocity = averageVelocity(of: eyes)
         let streak = EyeGeometry.trailOffset(velocity: velocity, configuration: settings)
+        let smears = streak.length > 1e-4 && trailScratch != nil
 
-        if streak.length > 1e-4 {
+        if smears, let trailScratch {
             var streakUniforms = DirectionalTrailUniforms(direction: streak.direction,
                                                           trailLength: streak.length)
 
@@ -382,7 +467,7 @@ final class EyeGlowRenderer {
 
         encoder.endEncoding()
 
-        if streak.length > 1e-4 {
+        if smears, let trailScratch {
             blurTrail?.encode(commandBuffer: commandBuffer,
                               sourceTexture: trailScratch, destinationTexture: next)
         }
@@ -454,4 +539,19 @@ struct EyeCompositeUniforms {
     var bloomContribution: Float
     var trailContribution: Float
     var bloomWeights: SIMD3<Float>
+    var debugTexture: UInt32
+}
+
+/// Mirrors `EyeGlowDebugUniforms`.
+struct EyeGlowDebugUniforms {
+    var leftCenter: SIMD2<Float>
+    var rightCenter: SIMD2<Float>
+    var leftVelocity: SIMD2<Float>
+    var rightVelocity: SIMD2<Float>
+    var leftCount: UInt32
+    var rightCount: UInt32
+    var showsContours: UInt32
+    var showsCenters: UInt32
+    var showsVelocity: UInt32
+    var pixelsPerUV: SIMD2<Float>
 }

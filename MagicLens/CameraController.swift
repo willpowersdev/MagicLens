@@ -33,7 +33,16 @@ final class CameraController {
     /// A `let` holding a reference type, so the macro leaves it alone.
     let touch = TouchState()
 
-    var effect: Effect = .infrared
+    var effect: Effect = .eyeGlow
+
+    /// The eye glow's tuning, as the settings panel edits it.
+    ///
+    /// The tracker is where it actually lives — both the Vision queue and the
+    /// renderer already reach it, and its accessor is synchronised. This is the
+    /// observable face of it, so SwiftUI has something to bind to.
+    var eyeGlow = EyeGlowConfiguration() {
+        didSet { feed.faces.eyeGlowSettings = eyeGlow }
+    }
 
     init() {
         // Every device this app supports has Metal; there is no meaningful

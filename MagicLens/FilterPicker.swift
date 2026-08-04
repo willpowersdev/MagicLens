@@ -15,6 +15,12 @@ struct FilterPicker: View {
 
     let dismiss: () -> Void
 
+    /// Opens the tuning panel for an effect that has one. Only the eye glow
+    /// does so far, so the row carries the control rather than the toolbar —
+    /// the bottom row is a fixed set of five and a sixth button that applied to
+    /// one effect in seventeen would sit there disabled most of the time.
+    var showSettings: ((Effect) -> Void)?
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -44,23 +50,41 @@ struct FilterPicker: View {
     }
 
     private func row(for effect: Effect) -> some View {
-        Button {
-            selection = effect
-            dismiss()
-        } label: {
-            HStack {
-                Text(effect.title)
-                Spacer()
-                if effect == selection {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
+        HStack(spacing: 0) {
+            Button {
+                selection = effect
+                dismiss()
+            } label: {
+                HStack {
+                    Text(effect.title)
+                    Spacer()
+                    if effect == selection {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(.tint)
+                    }
                 }
+                .padding(.leading, 20)
+                .padding(.vertical, 14)
+                .contentShape(.rect)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .contentShape(.rect)
+            .foregroundStyle(.primary)
+
+            if effect.hasSettings, let showSettings {
+                Button {
+                    selection = effect
+                    showSettings(effect)
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .foregroundStyle(.tint)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
+                        .contentShape(.rect)
+                }
+                .accessibilityLabel("\(effect.title) settings")
+            }
         }
-        .foregroundStyle(.primary)
+        .buttonStyle(.plain)
+        .padding(.trailing, 20)
     }
 
     private var header: some View {
