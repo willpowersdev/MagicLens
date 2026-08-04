@@ -5,7 +5,6 @@
 
 import AVFoundation
 import Observation
-import UIKit
 
 struct Recording: Identifiable, Hashable {
 
@@ -71,7 +70,7 @@ final class VideoLibrary {
     }
 
     /// Poster frame for the grid.
-    static func thumbnail(for recording: Recording) async -> UIImage? {
+    static func thumbnail(for recording: Recording) async -> PlatformImage? {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: recording.url))
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 400, height: 400)
@@ -80,6 +79,6 @@ final class VideoLibrary {
             return nil
         }
 
-        return UIImage(cgImage: image)
+        return PlatformImage.from(cgImage: image)
     }
 }

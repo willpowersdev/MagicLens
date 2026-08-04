@@ -32,7 +32,7 @@ struct RecordingsGrid: View {
                     grid
                 }
             }
-            .background(Color(.systemBackground))
+            .background(Color.pageBackground)
 
             if let playing {
                 RecordingPlayer(recording: playing) {
@@ -104,14 +104,14 @@ private struct RecordingThumbnail: View {
 
     let recording: Recording
 
-    @State private var poster: UIImage?
+    @State private var poster: PlatformImage?
 
     var body: some View {
         ZStack {
-            Color(.secondarySystemBackground)
+            Color.recessedBackground
 
             if let poster {
-                Image(uiImage: poster)
+                Image(platformImage: poster)
                     .resizable()
                     .scaledToFill()
             } else {

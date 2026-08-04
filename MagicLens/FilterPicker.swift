@@ -34,7 +34,7 @@ struct FilterPicker: View {
                 }
             }
         }
-        .background(Color(.systemBackground))
+        .background(Color.pageBackground)
         .ignoresSafeArea(edges: .bottom)
     }
 

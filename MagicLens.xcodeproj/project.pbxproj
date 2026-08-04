@@ -53,6 +53,51 @@
 		EB0006000000000000000004 /* FaceEffects.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0006000000000000000003 /* FaceEffects.metal */; };
 		EB0007000000000000000002 /* TeethHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0007000000000000000001 /* TeethHighlight.swift */; };
 		EB0007000000000000000004 /* TeethHighlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0007000000000000000003 /* TeethHighlightTests.swift */; };
+		EB00AC000000000000000002 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB00AC000000000000000001 /* Platform.swift */; };
+		EB00AC000000000000000003 /* Gradient.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0001000000000000000001 /* Gradient.metal */; };
+		EB00AC000000000000000004 /* Common.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000002 /* Common.metal */; };
+		EB00AC000000000000000005 /* EdgeHighlights.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000004 /* EdgeHighlights.metal */; };
+		EB00AC000000000000000006 /* Infrared.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000006 /* Infrared.metal */; };
+		EB00AC000000000000000007 /* Points.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000008 /* Points.metal */; };
+		EB00AC000000000000000008 /* Delirium.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB000000000000000000000A /* Delirium.metal */; };
+		EB00AC000000000000000009 /* Reflect.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB000000000000000000000C /* Reflect.metal */; };
+		EB00AC00000000000000000A /* LightTunnel.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB000000000000000000000E /* LightTunnel.metal */; };
+		EB00AC00000000000000000B /* Edge.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000010 /* Edge.metal */; };
+		EB00AC00000000000000000C /* RadialBlur.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000012 /* RadialBlur.metal */; };
+		EB00AC00000000000000000D /* Matrix.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000014 /* Matrix.metal */; };
+		EB00AC00000000000000000E /* CRT.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000016 /* CRT.metal */; };
+		EB00AC00000000000000000F /* AntiFisheye.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0000000000000000000018 /* AntiFisheye.metal */; };
+		EB00AC000000000000000010 /* FaceEffects.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0006000000000000000003 /* FaceEffects.metal */; };
+		EB00AC000000000000000011 /* Fisheye.metal in Sources */ = {isa = PBXBuildFile; fileRef = CDCB771A263D065C00709455 /* Fisheye.metal */; };
+		EB00AC000000000000000012 /* MagicLensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0002000000000000000001 /* MagicLensApp.swift */; };
+		EB00AC000000000000000013 /* Effect.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0002000000000000000003 /* Effect.swift */; };
+		EB00AC000000000000000014 /* CameraController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0002000000000000000005 /* CameraController.swift */; };
+		EB00AC000000000000000015 /* Renderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0002000000000000000007 /* Renderer.swift */; };
+		EB00AC000000000000000016 /* MetalCameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0002000000000000000009 /* MetalCameraView.swift */; };
+		EB00AC000000000000000017 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB000200000000000000000B /* CameraView.swift */; };
+		EB00AC000000000000000018 /* FilterPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB000200000000000000000D /* FilterPicker.swift */; };
+		EB00AC000000000000000019 /* VideoRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000001 /* VideoRecorder.swift */; };
+		EB00AC00000000000000001A /* VideoLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000003 /* VideoLibrary.swift */; };
+		EB00AC00000000000000001B /* RecordingsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000005 /* RecordingsGrid.swift */; };
+		EB00AC00000000000000001C /* FaceTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0006000000000000000001 /* FaceTracker.swift */; };
+		EB00AC00000000000000001D /* TeethHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0007000000000000000001 /* TeethHighlight.swift */; };
+		EB00AC00000000000000001E /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB00AC000000000000000001 /* Platform.swift */; };
+		EB00AC00000000000000001F /* CameraFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCB7706263C012700709455 /* CameraFeed.swift */; };
+		EB00AC000000000000000020 /* Array+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCB771C263D0ADF00709455 /* Array+Helpers.swift */; };
+		EB00AC000000000000000021 /* passThrough.vsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76FE263C012700709455 /* passThrough.vsh */; };
+		EB00AC000000000000000022 /* delirium.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76FB263C012700709455 /* delirium.fsh */; };
+		EB00AC000000000000000023 /* edge.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB7700263C012700709455 /* edge.fsh */; };
+		EB00AC000000000000000024 /* points.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76FA263C012700709455 /* points.fsh */; };
+		EB00AC000000000000000025 /* fisheye.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB7702263C012700709455 /* fisheye.fsh */; };
+		EB00AC000000000000000026 /* edgehighlights.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76F8263C012700709455 /* edgehighlights.fsh */; };
+		EB00AC000000000000000027 /* infrared.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76F9263C012700709455 /* infrared.fsh */; };
+		EB00AC000000000000000028 /* reflect.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76FC263C012700709455 /* reflect.fsh */; };
+		EB00AC000000000000000029 /* radialblur.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB7703263C012700709455 /* radialblur.fsh */; };
+		EB00AC00000000000000002A /* matrix.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB7704263C012700709455 /* matrix.fsh */; };
+		EB00AC00000000000000002B /* lighttunnel.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76FF263C012700709455 /* lighttunnel.fsh */; };
+		EB00AC00000000000000002C /* crt.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76FD263C012700709455 /* crt.fsh */; };
+		EB00AC00000000000000002D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CDCB7716263C01B900709455 /* Assets.xcassets */; };
+		EB00AC00000000000000002E /* antifisheye.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB7701263C012700709455 /* antifisheye.fsh */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -126,6 +171,10 @@
 		EB0006000000000000000003 /* FaceEffects.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = FaceEffects.metal; sourceTree = "<group>"; };
 		EB0007000000000000000001 /* TeethHighlight.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TeethHighlight.swift; sourceTree = "<group>"; };
 		EB0007000000000000000003 /* TeethHighlightTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TeethHighlightTests.swift; sourceTree = "<group>"; };
+		EB00AC000000000000000001 /* Platform.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
+		EB00AC00000000000000002F /* MagicLens.app (macOS) */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MagicLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EB00AC000000000000000030 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		EB00AC000000000000000031 /* MagicLensMac.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; path = MagicLensMac.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -150,12 +199,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EB00AC000000000000000035 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		CDCB76BB263C00D400709455 = {
 			isa = PBXGroup;
 			children = (
+				EB00AC000000000000000032 /* MagicLensMac */,
 				CDCB76C6263C00D400709455 /* MagicLens */,
 				CDCB76DD263C00D400709455 /* MagicLensTests */,
 				CDCB76E8263C00D400709455 /* MagicLensUITests */,
@@ -166,6 +223,7 @@
 		CDCB76C5263C00D400709455 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				EB00AC00000000000000002F /* MagicLens.app (macOS) */,
 				CDCB76C4263C00D400709455 /* MagicLens.app */,
 				CDCB76DA263C00D400709455 /* MagicLensTests.xctest */,
 				CDCB76E5263C00D400709455 /* MagicLensUITests.xctest */,
@@ -188,6 +246,7 @@
 				EB0003000000000000000005 /* RecordingsGrid.swift */,
 				EB0006000000000000000001 /* FaceTracker.swift */,
 				EB0007000000000000000001 /* TeethHighlight.swift */,
+				EB00AC000000000000000001 /* Platform.swift */,
 				CDCB7706263C012700709455 /* CameraFeed.swift */,
 				CDCB76D5263C00D400709455 /* Info.plist */,
 				CDCB7716263C01B900709455 /* Assets.xcassets */,
@@ -260,6 +319,15 @@
 			path = Extensions;
 			sourceTree = "<group>";
 		};
+		EB00AC000000000000000032 /* MagicLensMac */ = {
+			isa = PBXGroup;
+			children = (
+				EB00AC000000000000000030 /* Info.plist */,
+				EB00AC000000000000000031 /* MagicLensMac.entitlements */,
+			);
+			path = MagicLensMac;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -316,6 +384,23 @@
 			productReference = CDCB76E5263C00D400709455 /* MagicLensUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		EB00AC000000000000000036 /* MagicLensMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EB00AC000000000000000037 /* Build configuration list for PBXNativeTarget "MagicLensMac" */;
+			buildPhases = (
+				EB00AC000000000000000033 /* Sources */,
+				EB00AC000000000000000035 /* Frameworks */,
+				EB00AC000000000000000034 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MagicLensMac;
+			productName = MagicLens;
+			productReference = EB00AC00000000000000002F /* MagicLens.app (macOS) */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -352,6 +437,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				EB00AC000000000000000036 /* MagicLensMac */,
 				CDCB76C3263C00D400709455 /* MagicLens */,
 				CDCB76D9263C00D400709455 /* MagicLensTests */,
 				CDCB76E4263C00D400709455 /* MagicLensUITests */,
@@ -395,6 +481,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EB00AC000000000000000034 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EB00AC000000000000000021 /* passThrough.vsh in Resources */,
+				EB00AC000000000000000022 /* delirium.fsh in Resources */,
+				EB00AC000000000000000023 /* edge.fsh in Resources */,
+				EB00AC000000000000000024 /* points.fsh in Resources */,
+				EB00AC000000000000000025 /* fisheye.fsh in Resources */,
+				EB00AC000000000000000026 /* edgehighlights.fsh in Resources */,
+				EB00AC000000000000000027 /* infrared.fsh in Resources */,
+				EB00AC000000000000000028 /* reflect.fsh in Resources */,
+				EB00AC000000000000000029 /* radialblur.fsh in Resources */,
+				EB00AC00000000000000002A /* matrix.fsh in Resources */,
+				EB00AC00000000000000002B /* lighttunnel.fsh in Resources */,
+				EB00AC00000000000000002C /* crt.fsh in Resources */,
+				EB00AC00000000000000002D /* Assets.xcassets in Resources */,
+				EB00AC00000000000000002E /* antifisheye.fsh in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -429,6 +536,7 @@
 				EB0003000000000000000006 /* RecordingsGrid.swift in Sources */,
 				EB0006000000000000000002 /* FaceTracker.swift in Sources */,
 				EB0007000000000000000002 /* TeethHighlight.swift in Sources */,
+				EB00AC000000000000000002 /* Platform.swift in Sources */,
 				CDCB7715263C012700709455 /* CameraFeed.swift in Sources */,
 				CDCB771D263D0ADF00709455 /* Array+Helpers.swift in Sources */,
 			);
@@ -448,6 +556,43 @@
 			buildActionMask = 2147483647;
 			files = (
 				CDCB76EA263C00D400709455 /* MagicLensUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EB00AC000000000000000033 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EB00AC000000000000000003 /* Gradient.metal in Sources */,
+				EB00AC000000000000000004 /* Common.metal in Sources */,
+				EB00AC000000000000000005 /* EdgeHighlights.metal in Sources */,
+				EB00AC000000000000000006 /* Infrared.metal in Sources */,
+				EB00AC000000000000000007 /* Points.metal in Sources */,
+				EB00AC000000000000000008 /* Delirium.metal in Sources */,
+				EB00AC000000000000000009 /* Reflect.metal in Sources */,
+				EB00AC00000000000000000A /* LightTunnel.metal in Sources */,
+				EB00AC00000000000000000B /* Edge.metal in Sources */,
+				EB00AC00000000000000000C /* RadialBlur.metal in Sources */,
+				EB00AC00000000000000000D /* Matrix.metal in Sources */,
+				EB00AC00000000000000000E /* CRT.metal in Sources */,
+				EB00AC00000000000000000F /* AntiFisheye.metal in Sources */,
+				EB00AC000000000000000010 /* FaceEffects.metal in Sources */,
+				EB00AC000000000000000011 /* Fisheye.metal in Sources */,
+				EB00AC000000000000000012 /* MagicLensApp.swift in Sources */,
+				EB00AC000000000000000013 /* Effect.swift in Sources */,
+				EB00AC000000000000000014 /* CameraController.swift in Sources */,
+				EB00AC000000000000000015 /* Renderer.swift in Sources */,
+				EB00AC000000000000000016 /* MetalCameraView.swift in Sources */,
+				EB00AC000000000000000017 /* CameraView.swift in Sources */,
+				EB00AC000000000000000018 /* FilterPicker.swift in Sources */,
+				EB00AC000000000000000019 /* VideoRecorder.swift in Sources */,
+				EB00AC00000000000000001A /* VideoLibrary.swift in Sources */,
+				EB00AC00000000000000001B /* RecordingsGrid.swift in Sources */,
+				EB00AC00000000000000001C /* FaceTracker.swift in Sources */,
+				EB00AC00000000000000001D /* TeethHighlight.swift in Sources */,
+				EB00AC00000000000000001E /* Platform.swift in Sources */,
+				EB00AC00000000000000001F /* CameraFeed.swift in Sources */,
+				EB00AC000000000000000020 /* Array+Helpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -703,6 +848,60 @@
 			};
 			name = Release;
 		};
+		EB00AC000000000000000038 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MagicLensMac/MagicLensMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MagicLensMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ion6.MagicLens;
+				PRODUCT_NAME = MagicLens;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		EB00AC000000000000000039 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MagicLensMac/MagicLensMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MagicLensMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ion6.MagicLens;
+				PRODUCT_NAME = MagicLens;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -738,6 +937,15 @@
 			buildConfigurations = (
 				CDCB76F5263C00D400709455 /* Debug */,
 				CDCB76F6263C00D400709455 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EB00AC000000000000000037 /* Build configuration list for PBXNativeTarget "MagicLensMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EB00AC000000000000000038 /* Debug */,
+				EB00AC000000000000000039 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

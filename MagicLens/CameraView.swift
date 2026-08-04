@@ -201,13 +201,14 @@ struct CameraView: View {
 /// The chrome every control shares.
 ///
 /// Liquid Glass where the system has it, in its clear mode so the camera reads
-/// through the button rather than being covered by it. Below iOS 26 there is no
-/// equivalent, so those fall back to the solid disc these buttons used before.
+/// through the button rather than being covered by it. Below iOS 26 / macOS 26
+/// there is no equivalent, so those fall back to the solid disc these buttons
+/// used before.
 private struct ControlChrome: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             content.glassEffect(.clear, in: .circle)
         } else {
             content.background(.black.opacity(0.8), in: .circle)

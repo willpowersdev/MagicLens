@@ -23,6 +23,10 @@ final class CameraFeed: NSObject {
     private var metadataOutput:AVCaptureMetadataOutput?
     private var cameraPosition: AVCaptureDevice.Position = .front
 
+    /// Set by `rotateCamera` when it has already chosen which camera to move to,
+    /// so `startCapture` doesn't rediscover and overwrite the choice.
+    private var pendingDevice: AVCaptureDevice?
+
     /// Handed each microphone buffer, on `audioQueue`. Set by the controller so
     /// the feed doesn't need to know the recorder exists.
     var onAudioSample: ((CMSampleBuffer) -> Void)?
@@ -107,27 +111,61 @@ final class CameraFeed: NSObject {
         }
     }
 
+    /// Camera types worth looking for.
+    ///
+    /// A Mac's video comes from a built-in camera, a USB webcam, or an iPhone
+    /// over Continuity, and only the first of those reports a front or back
+    /// position at all.
+    private static var deviceTypes: [AVCaptureDevice.DeviceType] {
+        #if os(macOS)
+        [.builtInWideAngleCamera, .external, .continuityCamera]
+        #else
+        [.builtInWideAngleCamera]
+        #endif
+    }
+
     func startCapture() {
         sessionQueue.async { [weak self] in
             guard let self = self else {
                 return
             }
 
-            let devicePosition = self.cameraPosition
-            // TODO: Accomodate more than just the wide angle camera
-            let deviceDescoverySession = AVCaptureDevice.DiscoverySession.init(
-                deviceTypes: [AVCaptureDevice.DeviceType.builtInWideAngleCamera],
-                mediaType: AVMediaType.video,
-                position: devicePosition)
+            // A device chosen explicitly by rotateCamera wins; otherwise pick
+            // by position, falling back to whatever exists. A Mac usually has
+            // one camera and no notion of flipping it.
+            let device: AVCaptureDevice?
 
-            for device in deviceDescoverySession.devices {
-                if device.position == devicePosition {
-                    self.captureDevice = device
-                    self.beginSession()
-                    break
-                }
+            if let pending = self.pendingDevice {
+                device = pending
+                self.pendingDevice = nil
+            } else {
+                let wanted = self.cameraPosition
+
+                // Unspecified rather than `wanted`, so external cameras — which
+                // report no position — are still discovered.
+                let devices = AVCaptureDevice.DiscoverySession(
+                    deviceTypes: Self.deviceTypes,
+                    mediaType: .video,
+                    position: .unspecified).devices
+
+                device = devices.first(where: { $0.position == wanted }) ?? devices.first
             }
+
+            guard let device else {
+                return
+            }
+
+            self.captureDevice = device
+            self.beginSession()
         }
+    }
+
+    /// Whether there is more than one camera to switch between, so the flip
+    /// control can be hidden when there isn't.
+    static var hasMultipleCameras: Bool {
+        AVCaptureDevice.DiscoverySession(deviceTypes: deviceTypes,
+                                         mediaType: .video,
+                                         position: .unspecified).devices.count > 1
     }
 
     func pauseSession() {
@@ -148,12 +186,33 @@ final class CameraFeed: NSObject {
 
     func rotateCamera() {
         pauseSession()
+
         sessionQueue.async { [weak self] in
             guard let self = self else {
                 return
             }
+
+            #if os(macOS)
+            // Positions don't distinguish a Mac's cameras — a USB webcam and a
+            // built-in one both report unspecified — so step through the list
+            // instead, which is what "another camera" means here.
+            let devices = AVCaptureDevice.DiscoverySession(
+                deviceTypes: Self.deviceTypes,
+                mediaType: .video,
+                position: .unspecified).devices
+
+            if let current = self.captureDevice,
+               let index = devices.firstIndex(where: { $0.uniqueID == current.uniqueID }),
+               devices.count > 1 {
+                let next = devices[(index + 1) % devices.count]
+                self.pendingDevice = next
+                self.cameraPosition = next.position
+            }
+            #else
             self.cameraPosition = self.cameraPosition == .back ? .front : .back
+            #endif
         }
+
         startCapture()
     }
 
