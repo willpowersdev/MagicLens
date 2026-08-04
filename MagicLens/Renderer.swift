@@ -166,6 +166,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var effectPipelineState: MTLRenderPipelineState?
     private var currentEffect: Effect?
 
+    /// The eye glow's own passes. Built lazily, since most effects never touch
+    /// its textures and they are not small.
+    private lazy var eyeGlow: EyeGlowRenderer? = EyeGlowRenderer(device: device, library: library)
+
     /// Restarted whenever the effect changes, so time based effects begin from
     /// zero rather than mid-animation.
     private var startDate = Date()
@@ -309,6 +313,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         effectPipelineState = pipelineState
         currentEffect = effect
         startDate = Date()
+
+        // Whatever the trail accumulated belongs to a different effect, or to
+        // before this one was on screen.
+        eyeGlow?.reset()
     }
 
     /// What counts as bright and neutral enough to tint, given where the mouth
@@ -356,6 +364,80 @@ final class Renderer: NSObject, MTKViewDelegate {
                          bytesPerRow: 1)
         return texture
     }()
+
+    /// Stands in for the glow's targets before they exist. Read as `float`, as
+    /// the real ones are, so the same shader binding accepts either.
+    private lazy var emptyGlowTexture: MTLTexture? = {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm,
+                                                                  width: 1,
+                                                                  height: 1,
+                                                                  mipmapped: false)
+        descriptor.usage = .shaderRead
+
+        let texture = device.makeTexture(descriptor: descriptor)
+        var transparent: UInt32 = 0
+        texture?.replace(region: MTLRegionMake2D(0, 0, 1, 1),
+                         mipmapLevel: 0,
+                         withBytes: &transparent,
+                         bytesPerRow: 4)
+        return texture
+    }()
+
+    /// Binds the glow's textures and the composite's own settings.
+    ///
+    /// Its own uniform buffer rather than more fields on the shared one, which
+    /// every other shader would then carry for no reason.
+    ///
+    /// Every effect shares one encoder, so the indices are a single budget:
+    /// buffer 0 and texture 0 are the shared uniforms and the camera, buffers 1
+    /// and 2 and texture 1 belong to the mouth, which `bindMouth` rebinds after
+    /// this runs. The glow starts above all of them.
+    /// A nil renderer, or one whose textures aren't up yet, binds the empty
+    /// texture with every contribution at zero: the shader then composites
+    /// nothing over the camera, which is the right thing to show while the glow
+    /// isn't ready.
+    private func bindEyeGlow(_ glow: EyeGlowRenderer?, to encoder: MTLRenderCommandEncoder) {
+
+        let settings = (glow?.configuration ?? EyeGlowConfiguration()).sanitized
+
+        guard let glow,
+              let emission = glow.emission,
+              let small = glow.bloomSmall,
+              let medium = glow.bloomMedium,
+              let large = glow.bloomLarge,
+              let trail = glow.trail else {
+
+            var off = EyeCompositeUniforms(coreContribution: 0,
+                                           bloomContribution: 0,
+                                           trailContribution: 0,
+                                           bloomWeights: SIMD3(repeating: 0))
+
+            encoder.setFragmentBytes(&off,
+                                     length: MemoryLayout<EyeCompositeUniforms>.stride,
+                                     index: 3)
+
+            for index in 2...6 {
+                encoder.setFragmentTexture(emptyGlowTexture, index: index)
+            }
+            return
+        }
+
+        var composite = EyeCompositeUniforms(
+            coreContribution: settings.coreContribution,
+            bloomContribution: settings.bloomContribution,
+            trailContribution: settings.trailContribution,
+            bloomWeights: SIMD3(0.80, 0.55, 0.25))
+
+        encoder.setFragmentBytes(&composite,
+                                 length: MemoryLayout<EyeCompositeUniforms>.stride,
+                                 index: 3)
+
+        encoder.setFragmentTexture(emission, index: 2)
+        encoder.setFragmentTexture(small, index: 3)
+        encoder.setFragmentTexture(medium, index: 4)
+        encoder.setFragmentTexture(large, index: 5)
+        encoder.setFragmentTexture(trail, index: 6)
+    }
 
     /// Binds the mouth — segmented mask where there is one, inner-lip contour
     /// where there isn't — and the teeth settings.
@@ -423,13 +505,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     func draw(in view: MTKView) {
 
         guard let drawable = view.currentDrawable,
-              let descriptor = view.currentRenderPassDescriptor,
-              let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+              let commandBuffer = commandQueue.makeCommandBuffer() else {
             return
         }
-
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
         // Advanced once per rendered frame, so its smoothing and fades run on
         // the display's clock rather than the camera's.
@@ -443,8 +521,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         let mouthMask = feed.mouths.mask(at: now, elapsed: elapsed)
 
         // Video space and view space only coincide when the video exactly fills
-        // the view. Worked out once here so the effect draw, the overlay draw
-        // and the mouth polygon all agree.
+        // the view. Worked out once here so the effect draw, the overlay draw,
+        // the mouth polygon and the eye glow all agree.
         let cameraResolution = SIMD2(Float(feed.currentTexture?.width ?? 0),
                                      Float(feed.currentTexture?.height ?? 0))
         let viewResolution = SIMD2(Float(view.drawableSize.width),
@@ -471,6 +549,26 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         #endif
         let toView = { Self.videoPointToView($0, scale: scale) }
+
+        // The glow's own passes go in before the render encoder is opened —
+        // its emission, bloom and trail are separate targets, and Metal allows
+        // only one encoder on a command buffer at a time.
+        var glowReady = false
+        if currentEffect == .eyeGlow, let eyeGlow {
+            glowReady = eyeGlow.encode(commandBuffer: commandBuffer,
+                                       face: face,
+                                       drawableSize: view.drawableSize,
+                                       scale: scale,
+                                       elapsed: Double(elapsed),
+                                       now: now)
+        }
+
+        guard let descriptor = view.currentRenderPassDescriptor,
+              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            return
+        }
+
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
         // One set of uniforms for both draws. The overlay used to build its own
         // with the video fields zeroed, which was harmless while it only drew a
@@ -503,6 +601,13 @@ final class Renderer: NSObject, MTKViewDelegate {
                                      length: MemoryLayout<Uniforms>.stride,
                                      index: 0)
             encoder.setFragmentTexture(videoTexture, index: 0)
+
+            // Bound whenever the shader is, ready or not — an argument the
+            // fragment function declares but nothing filled in is a hard
+            // validation failure, not a black frame.
+            if currentEffect == .eyeGlow {
+                bindEyeGlow(glowReady ? eyeGlow : nil, to: encoder)
+            }
         } else {
             encoder.setRenderPipelineState(gradientPipelineState)
         }

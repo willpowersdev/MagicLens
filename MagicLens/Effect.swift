@@ -34,6 +34,7 @@ struct Effect: Identifiable, Hashable {
     static let faceHide = Effect(name: "facehide", title: "Hide My Face")
     static let faceWarp = Effect(name: "facewarp", title: "Big Head")
     static let teeth = Effect(name: "teeth", title: "Say Cheese")
+    static let eyeGlow = Effect(name: "eyeglow", title: "Night Elf")
 
     /// Presentation order in the picker.
     static let all: [Effect] = [
@@ -52,6 +53,7 @@ struct Effect: Identifiable, Hashable {
         .faceSpotlight,
         .faceHide,
         .faceWarp,
-        .teeth
+        .teeth,
+        .eyeGlow
     ]
 }

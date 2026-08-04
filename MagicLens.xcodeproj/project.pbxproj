@@ -102,6 +102,13 @@
 		EB00AC00000000000000002C /* crt.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB76FD263C012700709455 /* crt.fsh */; };
 		EB00AC00000000000000002D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CDCB7716263C01B900709455 /* Assets.xcassets */; };
 		EB00AC00000000000000002E /* antifisheye.fsh in Resources */ = {isa = PBXBuildFile; fileRef = CDCB7701263C012700709455 /* antifisheye.fsh */; };
+		EB0F00000000000000000002 /* EyeGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000001 /* EyeGlow.swift */; };
+		EB0F00000000000000000003 /* EyeGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000001 /* EyeGlow.swift */; };
+		EB0F00000000000000000005 /* EyeGlowRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000004 /* EyeGlowRenderer.swift */; };
+		EB0F00000000000000000006 /* EyeGlowRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000004 /* EyeGlowRenderer.swift */; };
+		EB0F00000000000000000008 /* EyeGlow.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000007 /* EyeGlow.metal */; };
+		EB0F00000000000000000009 /* EyeGlow.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0F00000000000000000007 /* EyeGlow.metal */; };
+		EB1F00000000000000000002 /* EyeGlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1F00000000000000000001 /* EyeGlowTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -181,6 +188,10 @@
 		EB00AC00000000000000002F /* MagicLens.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MagicLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EB00AC000000000000000030 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		EB00AC000000000000000031 /* MagicLensMac.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; path = MagicLensMac.entitlements; sourceTree = "<group>"; };
+		EB0F00000000000000000001 /* EyeGlow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EyeGlow.swift; sourceTree = "<group>"; };
+		EB0F00000000000000000004 /* EyeGlowRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EyeGlowRenderer.swift; sourceTree = "<group>"; };
+		EB0F00000000000000000007 /* EyeGlow.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = EyeGlow.metal; sourceTree = "<group>"; };
+		EB1F00000000000000000001 /* EyeGlowTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EyeGlowTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -254,6 +265,8 @@
 				EB0007000000000000000001 /* TeethHighlight.swift */,
 				EB0008000000000000000001 /* FaceParsing.swift */,
 				EB00AC000000000000000001 /* Platform.swift */,
+				EB0F00000000000000000001 /* EyeGlow.swift */,
+				EB0F00000000000000000004 /* EyeGlowRenderer.swift */,
 				CDCB7706263C012700709455 /* CameraFeed.swift */,
 				CDCB76D5263C00D400709455 /* Info.plist */,
 				CDCB7716263C01B900709455 /* Assets.xcassets */,
@@ -268,6 +281,7 @@
 			isa = PBXGroup;
 			children = (
 				EB0007000000000000000003 /* TeethHighlightTests.swift */,
+				EB1F00000000000000000001 /* EyeGlowTests.swift */,
 				CDCB76DE263C00D400709455 /* MagicLensTests.swift */,
 				CDCB76E0263C00D400709455 /* Info.plist */,
 			);
@@ -301,6 +315,7 @@
 				EB0000000000000000000016 /* CRT.metal */,
 				EB0000000000000000000018 /* AntiFisheye.metal */,
 				EB0006000000000000000003 /* FaceEffects.metal */,
+				EB0F00000000000000000007 /* EyeGlow.metal */,
 				CDCB771A263D065C00709455 /* Fisheye.metal */,
 				CDCB76F8263C012700709455 /* edgehighlights.fsh */,
 				CDCB76F9263C012700709455 /* infrared.fsh */,
@@ -525,6 +540,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EB0F00000000000000000008 /* EyeGlow.metal in Sources */,
+				EB0F00000000000000000005 /* EyeGlowRenderer.swift in Sources */,
+				EB0F00000000000000000002 /* EyeGlow.swift in Sources */,
 				EB0001000000000000000002 /* Gradient.metal in Sources */,
 				EB0000000000000000000003 /* Common.metal in Sources */,
 				EB0000000000000000000005 /* EdgeHighlights.metal in Sources */,
@@ -565,6 +583,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				EB0007000000000000000004 /* TeethHighlightTests.swift in Sources */,
+				EB1F00000000000000000002 /* EyeGlowTests.swift in Sources */,
 				CDCB76DF263C00D400709455 /* MagicLensTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -581,6 +600,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EB0F00000000000000000009 /* EyeGlow.metal in Sources */,
+				EB0F00000000000000000006 /* EyeGlowRenderer.swift in Sources */,
+				EB0F00000000000000000003 /* EyeGlow.swift in Sources */,
 				EB00AC000000000000000003 /* Gradient.metal in Sources */,
 				EB00AC000000000000000004 /* Common.metal in Sources */,
 				EB00AC000000000000000005 /* EdgeHighlights.metal in Sources */,

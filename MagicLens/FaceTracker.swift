@@ -56,6 +56,19 @@ struct TrackedFace: Equatable {
     /// or a moment of speech doesn't flash.
     var mouthOpacity: Float
 
+    /// Eye openings as contours rather than points, so the glow can follow the
+    /// eye's actual shape instead of stamping a circle on it.
+    var leftEyeShape: [SIMD2<Float>]
+    var rightEyeShape: [SIMD2<Float>]
+
+    /// 0 shut, 1 wide open, already through the configured range.
+    var leftOpenness: Float
+    var rightOpenness: Float
+
+    /// uv per second, for trailing the glow behind a moving head.
+    var leftVelocity: SIMD2<Float>
+    var rightVelocity: SIMD2<Float>
+
     static let none = TrackedFace(center: SIMD2(0.5, 0.5),
                                   size: SIMD2(0, 0),
                                   presence: 0,
@@ -65,7 +78,13 @@ struct TrackedFace: Equatable {
                                   rightPupil: SIMD2(0.5, 0.5),
                                   eyePresence: 0,
                                   mouth: [],
-                                  mouthOpacity: 0)
+                                  mouthOpacity: 0,
+                                  leftEyeShape: [],
+                                  rightEyeShape: [],
+                                  leftOpenness: 0,
+                                  rightOpenness: 0,
+                                  leftVelocity: SIMD2(0, 0),
+                                  rightVelocity: SIMD2(0, 0))
 }
 
 /// Shared face tracking, published to every effect through the uniforms.
@@ -126,6 +145,7 @@ final class FaceTracker {
     private var lastLandmarkAttempt: CFAbsoluteTime = 0
     private var visionInFlight = false
     private var storedConfiguration = TeethHighlightConfiguration()
+    private var storedEyeGlow = EyeGlowConfiguration()
     private var loggedMouth = false
 
     /// The latest face box in the camera buffer's own space, or nil when it has
@@ -144,6 +164,22 @@ final class FaceTracker {
         }
 
         return storedBufferFace
+    }
+
+    /// Eases a contour towards a new one, vertex by vertex.
+    ///
+    /// Only meaningful when the two correspond. A different point count means
+    /// Vision returned a different shape, so the new one is taken as it is
+    /// rather than easing between unrelated vertices.
+    private static func follow(_ current: [SIMD2<Float>],
+                               towards target: [SIMD2<Float>],
+                               rate: Float) -> [SIMD2<Float>] {
+
+        guard current.count == target.count else {
+            return target
+        }
+
+        return zip(current, target).map { $0 + ($1 - $0) * rate }
     }
 
     /// The current face, advanced to `now`. Called once per rendered frame.
@@ -175,6 +211,24 @@ final class FaceTracker {
             tracked.leftPupil += (eyeTarget.leftPupil - tracked.leftPupil) * follow
             tracked.rightPupil += (eyeTarget.rightPupil - tracked.rightPupil) * follow
             tracked.eyePresence += (1 - tracked.eyePresence) * step
+
+            // The contours themselves, on the same terms as the mouth below.
+            // Without this the glow has nothing to draw: `tracked` is what the
+            // renderer reads, and only the centres were ever carried across.
+            tracked.leftEyeShape = Self.follow(tracked.leftEyeShape,
+                                               towards: eyeTarget.leftEyeShape,
+                                               rate: follow)
+            tracked.rightEyeShape = Self.follow(tracked.rightEyeShape,
+                                                towards: eyeTarget.rightEyeShape,
+                                                rate: follow)
+
+            tracked.leftOpenness += (eyeTarget.leftOpenness - tracked.leftOpenness) * follow
+            tracked.rightOpenness += (eyeTarget.rightOpenness - tracked.rightOpenness) * follow
+
+            // Taken whole rather than eased: it was already measured across the
+            // gap between detections, which is the interval that matters.
+            tracked.leftVelocity = eyeTarget.leftVelocity
+            tracked.rightVelocity = eyeTarget.rightVelocity
         } else {
             tracked.eyePresence += (0 - tracked.eyePresence) * step
         }
@@ -381,6 +435,9 @@ final class FaceTracker {
                                   mirrored: mirrored)
         let faceExtent = SIMD2(Float(faceBox.width), Float(faceBox.height))
 
+        let leftShape = polygon(landmarks.leftEye)
+        let rightShape = polygon(landmarks.rightEye)
+
         let rawMouth = polygon(landmarks.innerLips)
 
         // TEMPORARY diagnostic. The rendering half is proven by
@@ -441,6 +498,32 @@ final class FaceTracker {
         }
 
         found.mouth = mouth
+        found.leftEyeShape = leftShape
+        found.rightEyeShape = rightShape
+
+        // Openness comes from the contour's own proportions, so it needs the
+        // raw shape rather than the smoothed one.
+        // The stored value directly, not the accessor: the lock is already held
+        // here and NSLock is not recursive.
+        let settings = storedEyeGlow
+        found.leftOpenness = EyeGeometry.smoothstep(settings.minimumEyeOpenness,
+                                                    settings.fullEyeOpenness,
+                                                    EyeGeometry.openness(of: leftShape))
+        found.rightOpenness = EyeGeometry.smoothstep(settings.minimumEyeOpenness,
+                                                     settings.fullEyeOpenness,
+                                                     EyeGeometry.openness(of: rightShape))
+
+        // Measured against the previous accepted landmarks rather than the
+        // rendered frame, since these arrive far less often.
+        let sinceLast = CFAbsoluteTimeGetCurrent() - lastLandmarks
+        if lastLandmarks > 0, sinceLast < Self.landmarkGraceSeconds {
+            found.leftVelocity = EyeGeometry.velocity(from: tracked.leftEye,
+                                                      to: leftEye,
+                                                      elapsed: sinceLast)
+            found.rightVelocity = EyeGeometry.velocity(from: tracked.rightEye,
+                                                       to: rightEye,
+                                                       elapsed: sinceLast)
+        }
 
         // Vertex-wise smoothing only makes sense when the contours correspond.
         // A different point count means Vision found a different shape, so take
@@ -452,6 +535,12 @@ final class FaceTracker {
         eyeTarget = found
         lastLandmarks = CFAbsoluteTimeGetCurrent()
         lock.unlock()
+    }
+
+    /// Tuning for the eye glow, read on the Vision queue.
+    var eyeGlowSettings: EyeGlowConfiguration {
+        get { lock.withLock { storedEyeGlow } }
+        set { lock.withLock { storedEyeGlow = newValue.sanitized } }
     }
 
     /// Tuning, read on the Vision queue and settable from anywhere.
