@@ -92,18 +92,7 @@ struct CameraView: View {
         .onAppear {
             controller.start()
         }
-        .onChange(of: scenePhase) { _, phase in
-            // The capture session is the expensive resource here — hand the
-            // camera back while the app isn't on screen.
-            switch phase {
-            case .active:
-                controller.resume()
-            case .inactive, .background:
-                controller.pause()
-            @unknown default:
-                break
-            }
-        }
+        .modifier(Lifecycle(controller: controller))
     }
 
     private var controls: some View {
@@ -228,6 +217,55 @@ struct CameraView: View {
         .accessibilityLabel("Recordings")
         .opacity(controller.isRecording ? 0 : 1)
         .disabled(controller.isRecording)
+    }
+}
+
+/// Stops the camera and the render loop while the app is out of sight, and
+/// starts them again when it comes back.
+///
+/// The two platforms disagree about what "out of sight" means, so they are asked
+/// different questions. An iPhone app that isn't foreground isn't visible, and
+/// scene phase says so directly. A Mac window can be entirely visible while the
+/// app is not frontmost — clicking another app doesn't mean you have stopped
+/// looking at this one — so the question there is whether anything is actually
+/// on screen, which is what occlusion reports. Hiding, minimising and being
+/// covered by another window all answer it correctly, and merely switching away
+/// leaves the preview running as it should.
+private struct Lifecycle: ViewModifier {
+
+    let controller: CameraController
+
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didChangeOcclusionStateNotification)) { _ in
+
+            if NSApp.occlusionState.contains(.visible) {
+                controller.resume()
+            } else {
+                controller.pause()
+            }
+        }
+        #else
+        content.onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                controller.pause()
+            case .active:
+                controller.resume()
+            case .inactive:
+                // Transient: a notification banner, Control Centre, the app
+                // switcher on the way past. Tearing the session down for those
+                // would also end a recording, and they are usually over before
+                // it could be rebuilt.
+                break
+            @unknown default:
+                break
+            }
+        }
+        #endif
     }
 }
 

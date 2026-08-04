@@ -65,11 +65,37 @@ final class CameraController {
         feed.startCapture()
     }
 
+    /// Whether the app is out of sight, and so neither capturing nor drawing.
+    ///
+    /// Observed, because the Metal view's own pausing is driven from it: the
+    /// camera and the render loop have to stop together or the view spends the
+    /// whole time redrawing the last frame it was given.
+    private(set) var isPaused = false
+
     func pause() {
+        guard !isPaused else {
+            return
+        }
+
+        isPaused = true
+
+        // A take can't survive this. The camera is about to stop delivering
+        // frames, and on iOS the app may not be running by the time it starts
+        // again — so the recording is closed and filed rather than left open to
+        // resume around a gap it has no way to represent.
+        if isRecording {
+            toggleRecording()
+        }
+
         feed.pauseSession()
     }
 
     func resume() {
+        guard isPaused else {
+            return
+        }
+
+        isPaused = false
         feed.resumeSession()
     }
 

@@ -164,12 +164,19 @@ struct MetalCameraView: PlatformViewRepresentable {
         context.coordinator.setEffect(controller.effect)
         context.coordinator.showsFaceOverlay = showsFaceOverlay
 
-        // Never paused. Pausing stops the view's display link, and that display
-        // link is what wakes the main run loop each frame — without it an idle
-        // run loop has nothing to drive the Core Animation commit, so a state
-        // change can sit unrendered until something unrelated happens to wake
-        // it. Rendering a hidden frame is far cheaper than that stall.
+        // Paused only when the app is out of sight, never merely because
+        // nothing appears to be changing.
         //
+        // Pausing stops the view's display link, and that display link is what
+        // wakes the main run loop each frame. Without it an idle run loop has
+        // nothing to drive the Core Animation commit, so a state change can sit
+        // unrendered until something unrelated happens to wake it — which is
+        // why redrawing an apparently unchanged frame is worth the cost while
+        // the app is on screen. Once it isn't, there is no commit to drive and
+        // no frame anyone can see, so the objection doesn't apply and the whole
+        // pipeline can stop.
+        view.isPaused = controller.isPaused
+
         // The drawable is left at the display's own scale. Rendering and
         // recording therefore happen at full native resolution.
     }
