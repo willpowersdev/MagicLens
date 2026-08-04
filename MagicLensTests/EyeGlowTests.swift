@@ -791,3 +791,231 @@ final class EyeGlowTests: XCTestCase {
         return SIMD2(centre.x / Float(width), centre.y / Float(height))
     }
 }
+
+/// The composite itself, run on the GPU.
+///
+/// Separate from the geometry tests because it answers a different question:
+/// not where the glow is drawn but what it does to everything it isn't drawn
+/// on. That failure is invisible by inspection — it looks like the room being
+/// dim — and the natural response to it is to turn the effect up, which hides
+/// it further.
+final class EyeGlowCompositeTests: XCTestCase {
+
+    private let side = 64
+
+    /// The bug this exists for. With nothing lit anywhere, the effect must hand
+    /// the camera back exactly as it found it.
+    ///
+    /// It used to tone map the camera and the glow together, so a frame with no
+    /// eyes in it came out at half brightness and could never be lighter than
+    /// mid grey.
+    func testAFrameWithNoGlowIsUnchanged() throws {
+        for grey in [Float(0.25), 0.5, 0.75, 1.0] {
+            let out = try composite(camera: grey, core: 0)
+
+            XCTAssertEqual(out, grey, accuracy: 0.02,
+                           "the effect darkened a frame it had drawn nothing on")
+        }
+    }
+
+    /// And whatever it does draw may only add light. A glow that darkened what
+    /// it passed over would be a shadow.
+    func testTheGlowOnlyEverBrightens() throws {
+        for core in [Float(0), 0.5, 2, 20] {
+            let dark = try composite(camera: 0.2, core: core)
+            let light = try composite(camera: 0.8, core: core)
+
+            XCTAssertGreaterThanOrEqual(dark, 0.2 - 0.02)
+            XCTAssertGreaterThanOrEqual(light, 0.8 - 0.02)
+        }
+    }
+
+    func testAHotCoreReachesWhite() throws {
+        XCTAssertGreaterThan(try composite(camera: 0.2, core: 60), 0.9,
+                             "the eye can't burn out however bright it gets")
+    }
+
+    /// Brighter glow, brighter result — monotonic, so the intensity slider
+    /// behaves the way a slider should.
+    func testMoreGlowIsAlwaysBrighter() throws {
+        var previous: Float = -1
+
+        for core in stride(from: Float(0), through: 8, by: 0.5) {
+            let value = try composite(camera: 0.35, core: core)
+            XCTAssertGreaterThanOrEqual(value, previous - 0.01)
+            previous = value
+        }
+    }
+
+    // MARK: - Harness
+
+    /// Renders one full-screen composite with a flat camera and a flat glow,
+    /// and returns the green channel of the middle pixel.
+    private func composite(camera: Float, core: Float) throws -> Float {
+
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let queue = device.makeCommandQueue() else {
+            throw XCTSkip("no Metal device")
+        }
+
+        let library = try device.makeDefaultLibrary(bundle: Bundle(for: EyeGlowRenderer.self))
+
+        guard let vertexFunction = library.makeFunction(name: "vertex_func"),
+              let fragmentFunction = library.makeFunction(name: "fragment_eyeglow") else {
+            throw XCTSkip("the composite isn't in the library")
+        }
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        descriptor.colorAttachments[0].pixelFormat = Renderer.colorPixelFormat
+
+        let pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+
+        let target = try XCTUnwrap(makeTarget(device: device))
+        let video = try XCTUnwrap(flat(device: device, value: camera, format: .rgba8Unorm))
+        let lit = try XCTUnwrap(flat(device: device, value: core, format: .rgba16Float))
+        let dark = try XCTUnwrap(flat(device: device, value: 0, format: .rgba16Float))
+
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = target
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        pass.colorAttachments[0].storeAction = .store
+
+        guard let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
+            throw XCTSkip("no encoder")
+        }
+
+        let quad: [Float] = [ 1, -1, 1, 0,
+                              1,  1, 1, 1,
+                             -1,  1, 0, 1,
+                             -1, -1, 0, 0]
+        let indices: [UInt32] = [0, 1, 2, 2, 3, 0]
+
+        let vertexBuffer = try XCTUnwrap(device.makeBuffer(bytes: quad,
+                                                           length: MemoryLayout<Float>.stride * quad.count,
+                                                           options: []))
+        let indexBuffer = try XCTUnwrap(device.makeBuffer(bytes: indices,
+                                                          length: MemoryLayout<UInt32>.stride * indices.count,
+                                                          options: []))
+
+        let resolution = SIMD2<Float>(Float(side), Float(side))
+
+        var uniforms = Uniforms(resolution: resolution,
+                                cameraResolution: resolution,
+                                touchPoint: SIMD2(0.5, 0.5),
+                                globalTime: 0,
+                                videoRotated: 0,
+                                videoMirrored: 0,
+                                videoLetterboxed: 0,
+                                faceCenter: SIMD2(0.5, 0.5),
+                                faceSize: SIMD2(0, 0),
+                                facePresence: 0,
+                                leftEye: SIMD2(0.5, 0.5),
+                                rightEye: SIMD2(0.5, 0.5),
+                                leftPupil: SIMD2(0.5, 0.5),
+                                rightPupil: SIMD2(0.5, 0.5),
+                                eyePresence: 0)
+
+        let settings = EyeGlowConfiguration()
+
+        var blend = EyeCompositeUniforms(coreContribution: settings.coreContribution,
+                                         bloomContribution: 0,
+                                         trailContribution: 0,
+                                         bloomWeights: SIMD3(repeating: 0),
+                                         debugTexture: 0)
+
+        var debug = EyeGlowDebugUniforms(leftCenter: SIMD2(-1, -1),
+                                         rightCenter: SIMD2(-1, -1),
+                                         leftVelocity: SIMD2(0, 0),
+                                         rightVelocity: SIMD2(0, 0),
+                                         leftCount: 0,
+                                         rightCount: 0,
+                                         showsContours: 0,
+                                         showsCenters: 0,
+                                         showsVelocity: 0,
+                                         pixelsPerUV: resolution)
+
+        var contour = [SIMD2<Float>(0, 0)]
+
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
+        encoder.setFragmentBytes(&blend, length: MemoryLayout<EyeCompositeUniforms>.stride, index: 3)
+        encoder.setFragmentBytes(&debug, length: MemoryLayout<EyeGlowDebugUniforms>.stride, index: 4)
+        encoder.setFragmentBytes(&contour, length: MemoryLayout<SIMD2<Float>>.stride, index: 5)
+
+        encoder.setFragmentTexture(video, index: 0)
+        encoder.setFragmentTexture(lit, index: 2)
+        for index in 3...6 {
+            encoder.setFragmentTexture(dark, index: index)
+        }
+
+        encoder.drawIndexedPrimitives(type: .triangle,
+                                      indexCount: indices.count,
+                                      indexType: .uint32,
+                                      indexBuffer: indexBuffer,
+                                      indexBufferOffset: 0)
+        encoder.endEncoding()
+
+        let bytesPerRow = side * 4
+        let readback = try XCTUnwrap(device.makeBuffer(length: bytesPerRow * side,
+                                                        options: .storageModeShared))
+
+        guard let blit = commandBuffer.makeBlitCommandEncoder() else {
+            throw XCTSkip("no blit encoder")
+        }
+
+        blit.copy(from: target, sourceSlice: 0, sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: side, height: side, depth: 1),
+                  to: readback, destinationOffset: 0,
+                  destinationBytesPerRow: bytesPerRow,
+                  destinationBytesPerImage: bytesPerRow * side)
+        blit.endEncoding()
+
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+
+        let bytes = readback.contents().bindMemory(to: UInt8.self, capacity: bytesPerRow * side)
+        let middle = (side / 2) * bytesPerRow + (side / 2) * 4
+
+        // bgra8Unorm, so green is the second byte either way.
+        return Float(bytes[middle + 1]) / 255
+    }
+
+    private func makeTarget(device: MTLDevice) -> MTLTexture? {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Renderer.colorPixelFormat,
+            width: side, height: side, mipmapped: false)
+        descriptor.usage = [.renderTarget, .shaderRead]
+        return device.makeTexture(descriptor: descriptor)
+    }
+
+    /// A 1×1 texture of one value, which clamp-to-edge sampling spreads over
+    /// the whole frame.
+    private func flat(device: MTLDevice, value: Float, format: MTLPixelFormat) -> MTLTexture? {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: format, width: 1, height: 1, mipmapped: false)
+        descriptor.usage = .shaderRead
+
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            return nil
+        }
+
+        let region = MTLRegionMake2D(0, 0, 1, 1)
+
+        if format == .rgba16Float {
+            var texel = [Float16(value), Float16(value), Float16(value), Float16(1)]
+            texture.replace(region: region, mipmapLevel: 0, withBytes: &texel, bytesPerRow: 8)
+        } else {
+            let level = UInt8(max(0, min(1, value)) * 255)
+            var texel: [UInt8] = [level, level, level, 255]
+            texture.replace(region: region, mipmapLevel: 0, withBytes: &texel, bytesPerRow: 4)
+        }
+
+        return texture
+    }
+}

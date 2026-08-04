@@ -282,11 +282,16 @@ static float3 debugOverlay(float3 base,
 
 /// Lays the glow over the camera frame.
 ///
-/// Bloom and trail go on as a screen blend, which brightens without clipping
-/// the picture underneath, and the sharp core is added on top so the eye itself
-/// stays hot. The reinhard step at the end is the only tone map in this path —
-/// the rest of the app writes straight to an 8-bit drawable and doesn't
-/// tone map, so this is not doubling up.
+/// The glow is HDR and runs well above 1, so it has to be tone mapped. The
+/// camera does not: it arrives display-referred, with nothing to compress.
+/// Mapping their sum — which this did — pulls every pixel down whether or not
+/// there is any glow near it, so a frame with no eyes in it came out at half
+/// brightness and could never be lighter than mid grey. It read as haze rather
+/// than as a bug, and it was quietly answered by turning the intensity up.
+///
+/// So only the added light is mapped, and the result is screened over the
+/// picture. Screen only ever brightens, so the camera is untouched where the
+/// glow is dark and blown to white where it is hot.
 /// Buffers 1 and 2 and texture 1 are the mouth's, bound for every effect after
 /// this one's are — see `Renderer.bindEyeGlow`. Hence the gap.
 fragment float4 fragment_eyeglow(VertexOut interpolated [[stage_in]],
@@ -337,12 +342,16 @@ fragment float4 fragment_eyeglow(VertexOut interpolated [[stage_in]],
 
     float3 trailColour = trail.sample(linearSampler, glowUV).rgb;
 
-    float3 soft = bloom * composite.bloomContribution
-                + trailColour * composite.trailContribution;
+    // Everything the effect adds, still in HDR: the soft light around the eye
+    // and the hot core inside it.
+    float3 glow = bloom * composite.bloomContribution
+                + trailColour * composite.trailContribution
+                + core * composite.coreContribution;
 
-    float3 screened = 1.0 - (1.0 - camera) * (1.0 - saturate(soft));
+    // Mapped on its own, so the camera keeps its own range.
+    float3 mapped = glow / (1.0 + glow);
 
-    float3 result = screened + core * composite.coreContribution;
+    float3 result = 1.0 - (1.0 - camera) * (1.0 - saturate(mapped));
 
-    return float4(debugOverlay(result / (1.0 + result), uv, debug, contours), 1.0);
+    return float4(debugOverlay(result, uv, debug, contours), 1.0);
 }
