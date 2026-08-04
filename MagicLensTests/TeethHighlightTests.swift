@@ -334,6 +334,53 @@ final class TeethRenderTests: XCTestCase {
                              "the shader did not tint a mouth polygon placed directly on the teeth")
     }
 
+    /// Letterboxing must show the whole frame, with black where it doesn't
+    /// reach — the macOS behaviour, since a window can be any shape and filling
+    /// a wide one throws most of the picture away.
+    func testLetterboxingBandsAWideViewWithoutLosingThePicture() throws {
+        let image = try XCTUnwrap(UIImage(named: "yellow_teeth_test"))
+        let buffer = try XCTUnwrap(Self.pixelBuffer(from: try XCTUnwrap(image.cgImage)))
+
+        // The source is portrait; a wide view is the case that crops hardest.
+        let rendered = try Self.render(buffer: buffer,
+                                       mouth: knownTeeth,
+                                       configuration: TeethHighlightConfiguration(),
+                                       rotated: false,
+                                       mirrored: false,
+                                       letterboxed: true,
+                                       viewSize: CGSize(width: 1200, height: 500))
+
+        func rowIsBlack(_ y: Int) -> Bool {
+            let start = y * rendered.width * 4
+            for x in stride(from: 0, to: rendered.width * 4, by: 4) {
+                let b = rendered.pixels[start + x]
+                let g = rendered.pixels[start + x + 1]
+                let r = rendered.pixels[start + x + 2]
+                if r > 8 || g > 8 || b > 8 { return false }
+            }
+            return true
+        }
+
+        // Pillarboxed here, not letterboxed: a portrait frame in a wide view
+        // leaves bars at the sides. Either way the whole frame survives.
+        func columnIsBlack(_ x: Int) -> Bool {
+            for y in stride(from: 0, to: rendered.height, by: 4) {
+                let i = y * rendered.width * 4 + x * 4
+                if rendered.pixels[i] > 8 || rendered.pixels[i + 1] > 8
+                    || rendered.pixels[i + 2] > 8 { return false }
+            }
+            return true
+        }
+
+        XCTAssertTrue(columnIsBlack(2), "no bar at the left edge")
+        XCTAssertTrue(columnIsBlack(rendered.width - 3), "no bar at the right edge")
+        XCTAssertFalse(rowIsBlack(rendered.height / 2), "the picture itself is missing")
+
+        try? FileManager.default.createDirectory(at: Self.output, withIntermediateDirectories: true)
+        try Self.writePNG(rendered.pixels, width: rendered.width, height: rendered.height,
+                          to: Self.output.appendingPathComponent("letterboxed.png"))
+    }
+
     func testTeethAreTintedOnAStillPhotograph() throws {
         let image = try XCTUnwrap(UIImage(named: "yellow_teeth_test"),
                                  "test image missing from the app bundle")
@@ -457,20 +504,27 @@ final class TeethRenderTests: XCTestCase {
                                mouth: [SIMD2<Float>],
                                configuration: TeethHighlightConfiguration,
                                rotated: Bool,
-                               mirrored: Bool) throws -> Rendered {
+                               mirrored: Bool,
+                               letterboxed: Bool = false,
+                               viewSize: CGSize? = nil) throws -> Rendered {
 
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let queue = try XCTUnwrap(device.makeCommandQueue())
         let library = try XCTUnwrap(device.makeDefaultLibrary(), "no default.metallib")
 
-        let width = CVPixelBufferGetWidth(buffer)
-        let height = CVPixelBufferGetHeight(buffer)
+        let sourceWidth = CVPixelBufferGetWidth(buffer)
+        let sourceHeight = CVPixelBufferGetHeight(buffer)
+
+        // The view can be a different shape to the video, which is the whole
+        // point when checking how the two are fitted together.
+        let width = Int(viewSize?.width ?? CGFloat(sourceWidth))
+        let height = Int(viewSize?.height ?? CGFloat(sourceHeight))
 
         var cache: CVMetalTextureCache?
         CVMetalTextureCacheCreate(nil, nil, device, nil, &cache)
         var wrapper: CVMetalTexture?
         CVMetalTextureCacheCreateTextureFromImage(nil, try XCTUnwrap(cache), buffer, nil,
-                                                  .bgra8Unorm, width, height, 0, &wrapper)
+                                                  .bgra8Unorm, sourceWidth, sourceHeight, 0, &wrapper)
         let source = try XCTUnwrap(CVMetalTextureGetTexture(try XCTUnwrap(wrapper)))
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -505,11 +559,12 @@ final class TeethRenderTests: XCTestCase {
 
         var uniforms = Uniforms(
             resolution: SIMD2(Float(width), Float(height)),
-            cameraResolution: SIMD2(Float(width), Float(height)),
+            cameraResolution: SIMD2(Float(sourceWidth), Float(sourceHeight)),
             touchPoint: SIMD2(0.5, 0.5),
             globalTime: 0,
             videoRotated: rotated ? 1 : 0,
             videoMirrored: mirrored ? 1 : 0,
+            videoLetterboxed: letterboxed ? 1 : 0,
             faceCenter: SIMD2(0.5, 0.5),
             faceSize: SIMD2(0.5, 0.5),
             facePresence: 1,
@@ -517,7 +572,14 @@ final class TeethRenderTests: XCTestCase {
             leftPupil: SIMD2(0.5, 0.5), rightPupil: SIMD2(0.5, 0.5),
             eyePresence: 1)
 
-        var points = mouth
+        // The renderer maps tracked geometry into view space before binding it;
+        // the harness has to do the same or the mask lands somewhere else.
+        let scale = Renderer.videoToViewScale(
+            cameraResolution: SIMD2(Float(sourceWidth), Float(sourceHeight)),
+            viewResolution: SIMD2(Float(width), Float(height)),
+            rotated: rotated,
+            letterboxed: letterboxed)
+        var points = mouth.map { Renderer.videoPointToView($0, scale: scale) }
         var teeth = TeethUniforms(
             minimumBrightness: configuration.minimumBrightness,
             maximumSaturation: configuration.maximumSaturation,

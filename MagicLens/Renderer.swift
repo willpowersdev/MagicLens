@@ -17,6 +17,8 @@ struct Uniforms {
     var videoRotated: Float
     /// 1 for the selfie camera, which wants mirroring.
     var videoMirrored: Float
+    /// 1 to letterbox the whole frame into the view, 0 to fill and crop.
+    var videoLetterboxed: Float
 
     /// Where the tracked face is, in the same uv space the effects use.
     var faceCenter: SIMD2<Float>
@@ -56,6 +58,70 @@ struct TeethUniforms {
 final class Renderer: NSObject, MTKViewDelegate {
 
     static let colorPixelFormat: MTLPixelFormat = .bgra8Unorm
+
+    /// How video-space uv maps onto the view, matching what sampleVideo does.
+    ///
+    /// Everything tracked — face boxes, eyes, the mouth contour — is measured
+    /// against the camera frame, but the effects and overlays are drawn in view
+    /// space. Once the video is fitted rather than stretched those two stop
+    /// coinciding, so tracked points have to be mapped across or they drift off
+    /// the thing they are tracking.
+    static func videoToViewScale(cameraResolution: SIMD2<Float>,
+                                 viewResolution: SIMD2<Float>,
+                                 rotated: Bool,
+                                 letterboxed: Bool = letterboxes) -> SIMD2<Float> {
+
+        let videoSize = rotated
+            ? SIMD2(cameraResolution.y, cameraResolution.x)
+            : cameraResolution
+
+        guard videoSize.x > 0, videoSize.y > 0, viewResolution.y > 0 else {
+            return SIMD2(1, 1)
+        }
+
+        let videoAspect = videoSize.x / videoSize.y
+        let viewAspect = viewResolution.x / viewResolution.y
+
+        var scale = SIMD2<Float>(1, 1)
+
+        if letterboxed {
+            if videoAspect > viewAspect {
+                scale.y = videoAspect / viewAspect
+            } else {
+                scale.x = viewAspect / videoAspect
+            }
+        } else {
+            if videoAspect > viewAspect {
+                scale.x = viewAspect / videoAspect
+            } else {
+                scale.y = videoAspect / viewAspect
+            }
+        }
+
+        return scale
+    }
+
+    /// Takes a point measured against the video into view space.
+    ///
+    /// The inverse of the shader's `(s - 0.5) * scale + 0.5`, since that maps
+    /// the view onto the video and this needs to go the other way.
+    static func videoPointToView(_ point: SIMD2<Float>, scale: SIMD2<Float>) -> SIMD2<Float> {
+        (point - 0.5) / scale + 0.5
+    }
+
+    /// Whether to fit the whole frame into the view rather than filling it.
+    ///
+    /// A window is any shape at all, so filling one throws picture away — a
+    /// wide window loses the top and bottom, which is exactly what a camera
+    /// preview should not do. A phone screen is fixed and close to the camera's
+    /// own shape, so there filling is right and loses almost nothing.
+    static var letterboxes: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
 
 
     /// Matches the top of the gradient, so a dropped frame is invisible.
@@ -237,13 +303,18 @@ final class Renderer: NSObject, MTKViewDelegate {
     ///
     /// The feather is scaled by the face rather than fixed, so the soft edge
     /// stays proportionate whether someone is close to the camera or far away.
-    private func bindMouth(face: TrackedFace, to encoder: MTLRenderCommandEncoder) {
+    private func bindMouth(face: TrackedFace,
+                           scale: SIMD2<Float>,
+                           to encoder: MTLRenderCommandEncoder) {
 
         let settings = feed.faces.configuration
 
         // setFragmentBytes rejects a zero length, and the shaders are guarded
-        // by the count regardless.
-        var mouth = face.mouth.isEmpty ? [SIMD2<Float>(0, 0)] : face.mouth
+        // by the count regardless. Mapped into view space like the rest of the
+        // tracked geometry.
+        var mouth = face.mouth.isEmpty
+            ? [SIMD2<Float>(0, 0)]
+            : face.mouth.map { Self.videoPointToView($0, scale: scale) }
 
         var teeth = TeethUniforms(
             minimumBrightness: settings.minimumBrightness,
@@ -254,7 +325,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             // Scaled by the mouth, not the face. Against the face the feather
             // came out around ten times the height of the opening, so the mask
             // never reached full strength anywhere and the tint was patchy.
-            edgeFeather: settings.edgeFeather * max(face.mouthHeight, 0.002),
+            edgeFeather: settings.edgeFeather * max(face.mouthHeight / scale.y, 0.002),
             mouthOpacity: face.mouthOpacity,
             mouthPointCount: Int32(face.mouth.count),
             yellowColor: settings.yellowColor)
@@ -289,38 +360,42 @@ final class Renderer: NSObject, MTKViewDelegate {
         lastDrawTime = now
         let face = feed.faces.face(at: now, elapsed: elapsed)
 
+        // Video space and view space only coincide when the video exactly fills
+        // the view. Worked out once here so the effect draw, the overlay draw
+        // and the mouth polygon all agree.
+        let cameraResolution = SIMD2(Float(feed.currentTexture?.width ?? 0),
+                                     Float(feed.currentTexture?.height ?? 0))
+        let viewResolution = SIMD2(Float(view.drawableSize.width),
+                                   Float(view.drawableSize.height))
+        #if os(macOS)
+        let needsRotation = false
+        #else
+        let needsRotation = cameraResolution.x > cameraResolution.y
+        #endif
+
+        let scale = Self.videoToViewScale(cameraResolution: cameraResolution,
+                                          viewResolution: viewResolution,
+                                          rotated: needsRotation)
+        let toView = { Self.videoPointToView($0, scale: scale) }
+
         if let videoTexture = feed.currentTexture, let pipelineState = effectPipelineState {
             encoder.setRenderPipelineState(pipelineState)
 
-            // Read off the frame itself rather than assumed, so this stays right
-            // if some device or format does hand back an already-rotated buffer.
-            //
-            // Only iOS needs the quarter turn: a phone is held upright while its
-            // sensor delivers landscape. A Mac's camera is already the right way
-            // up for a landscape window, so rotating there lays the picture on
-            // its side.
-            #if os(macOS)
-            let needsRotation = false
-            #else
-            let needsRotation = videoTexture.width > videoTexture.height
-            #endif
-
             var uniforms = Uniforms(
-                resolution: SIMD2(Float(view.drawableSize.width),
-                                  Float(view.drawableSize.height)),
-                cameraResolution: SIMD2(Float(videoTexture.width),
-                                        Float(videoTexture.height)),
+                resolution: viewResolution,
+                cameraResolution: cameraResolution,
                 touchPoint: touch.normalized,
                 globalTime: Float(Date().timeIntervalSince(startDate)),
                 videoRotated: needsRotation ? 1.0 : 0.0,
                 videoMirrored: feed.isFrontFacing ? 1.0 : 0.0,
-                faceCenter: face.center,
-                faceSize: face.size,
+                videoLetterboxed: Self.letterboxes ? 1.0 : 0.0,
+                faceCenter: toView(face.center),
+                faceSize: face.size / scale,
                 facePresence: face.presence,
-                leftEye: face.leftEye,
-                rightEye: face.rightEye,
-                leftPupil: face.leftPupil,
-                rightPupil: face.rightPupil,
+                leftEye: toView(face.leftEye),
+                rightEye: toView(face.rightEye),
+                leftPupil: toView(face.leftPupil),
+                rightPupil: toView(face.rightPupil),
                 eyePresence: face.eyePresence)
 
             // Small enough to go inline rather than through an MTLBuffer.
@@ -335,7 +410,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Bound for both draws and both branches. Only the teeth effect and the
         // debug overlay read them, but leaving them unbound on the gradient path
         // would hand the overlay whatever happened to be there.
-        bindMouth(face: face, to: encoder)
+        bindMouth(face: face, scale: scale, to: encoder)
 
         encoder.drawIndexedPrimitives(type: .triangle,
                                       indexCount: Self.indexData.count,
@@ -355,20 +430,21 @@ final class Renderer: NSObject, MTKViewDelegate {
                 globalTime: 0,
                 videoRotated: 0,
                 videoMirrored: 0,
-                faceCenter: face.center,
-                faceSize: face.size,
+                videoLetterboxed: 0,
+                faceCenter: toView(face.center),
+                faceSize: face.size / scale,
                 facePresence: face.presence,
-                leftEye: face.leftEye,
-                rightEye: face.rightEye,
-                leftPupil: face.leftPupil,
-                rightPupil: face.rightPupil,
+                leftEye: toView(face.leftEye),
+                rightEye: toView(face.rightEye),
+                leftPupil: toView(face.leftPupil),
+                rightPupil: toView(face.rightPupil),
                 eyePresence: face.eyePresence)
 
             encoder.setRenderPipelineState(overlay)
             encoder.setFragmentBytes(&overlayUniforms,
                                      length: MemoryLayout<Uniforms>.stride,
                                      index: 0)
-            bindMouth(face: face, to: encoder)
+            bindMouth(face: face, scale: scale, to: encoder)
             encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: Self.indexData.count,
                                           indexType: .uint32,

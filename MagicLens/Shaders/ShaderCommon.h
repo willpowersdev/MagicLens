@@ -25,6 +25,8 @@ struct Uniforms {
     float videoRotated;
     /// 1 for the selfie camera, which wants mirroring.
     float videoMirrored;
+    /// 1 to letterbox the whole frame into the view, 0 to fill and crop.
+    float videoLetterboxed;
 
     /// Where the tracked face is, in this same uv space. Available to every
     /// effect, not just the face-aware ones — see faceMask below.
@@ -86,13 +88,18 @@ static inline float4 sampleVideo(texture2d<float> video,
         screen.x = 1.0 - screen.x;
     }
 
-    // Fill the view without distorting the picture.
+    // Fit the video to the view without distorting it.
     //
     // The quad always covers the drawable, so without this the video is simply
     // stretched to whatever shape the view happens to be — unnoticeable on a
     // phone screen that roughly matches the camera, and badly wrong in a
-    // resizable window. Scaling uv about the centre crops the overflowing axis
-    // instead, which is aspect-fill.
+    // resizable window. Scaling uv about the centre corrects it.
+    //
+    // Two behaviours, because the platforms want different things. A phone
+    // screen is fixed and close to the camera's own shape, so filling it and
+    // losing a sliver is right. A window is any shape at all, and filling a
+    // wide one throws away most of the picture — so the whole frame is fitted
+    // inside instead, with black where it doesn't reach.
     //
     // Applied here rather than in each effect because it belongs to the video,
     // not to the effect's own coordinate space: every shader keeps working in
@@ -106,13 +113,32 @@ static inline float4 sampleVideo(texture2d<float> video,
         float viewAspect = uniforms.resolution.x / uniforms.resolution.y;
 
         float2 scale = float2(1.0);
-        if (videoAspect > viewAspect) {
-            scale.x = viewAspect / videoAspect;   // wider than the view: crop the sides
+
+        if (uniforms.videoLetterboxed > 0.5) {
+            // Expand the short axis past the view, so the whole frame fits and
+            // the overshoot falls outside the texture.
+            if (videoAspect > viewAspect) {
+                scale.y = videoAspect / viewAspect;
+            } else {
+                scale.x = viewAspect / videoAspect;
+            }
         } else {
-            scale.y = videoAspect / viewAspect;   // taller: crop top and bottom
+            // Shrink the overflowing axis, cropping it.
+            if (videoAspect > viewAspect) {
+                scale.x = viewAspect / videoAspect;
+            } else {
+                scale.y = videoAspect / viewAspect;
+            }
         }
 
         screen = (screen - 0.5) * scale + 0.5;
+    }
+
+    // Outside the frame when letterboxing. Black rather than the clamped edge
+    // pixel, which would smear the border across the bars.
+    if (uniforms.videoLetterboxed > 0.5 &&
+        (screen.x < 0.0 || screen.x > 1.0 || screen.y < 0.0 || screen.y > 1.0)) {
+        return float4(0.0, 0.0, 0.0, 1.0);
     }
 
     // Stand the landscape frame up: a quarter turn clockwise. Destination
