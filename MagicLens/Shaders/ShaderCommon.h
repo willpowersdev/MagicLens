@@ -71,13 +71,18 @@ static inline float2 bottomLeftFragCoord(float4 position, float2 resolution) {
 /// If the image still comes out wrong, this function is the only thing to
 /// change: swap the two branches of `rotated` for the opposite quarter turn,
 /// or drop the `mirrored` block to stop flipping the selfie camera.
-static inline float4 sampleVideo(texture2d<float> video,
-                                 float2 uv,
-                                 constant Uniforms &uniforms) {
-
-    constexpr sampler videoSampler(coord::normalized,
-                                   address::clamp_to_edge,
-                                   filter::linear);
+/// Where in the camera buffer a screen uv lands, and whether it lands outside
+/// the frame at all.
+///
+/// Factored out of `sampleVideo` because the video is not the only thing
+/// sampled in that space. The mouth mask is traced on the camera buffer, so it
+/// has to be looked up through exactly this mapping — anything separately
+/// derived would agree in the common case and drift apart under rotation,
+/// mirroring or a mismatched view shape, which is the failure that looks like
+/// bad segmentation rather than bad coordinates.
+static inline float2 videoTexCoord(float2 uv,
+                                   constant Uniforms &uniforms,
+                                   thread bool &outside) {
 
     // GL samples with (0,0) at the bottom left, Metal at the top left.
     float2 screen = float2(uv.x, 1.0 - uv.y);
@@ -134,18 +139,32 @@ static inline float4 sampleVideo(texture2d<float> video,
         screen = (screen - 0.5) * scale + 0.5;
     }
 
-    // Outside the frame when letterboxing. Black rather than the clamped edge
-    // pixel, which would smear the border across the bars.
-    if (uniforms.videoLetterboxed > 0.5 &&
-        (screen.x < 0.0 || screen.x > 1.0 || screen.y < 0.0 || screen.y > 1.0)) {
-        return float4(0.0, 0.0, 0.0, 1.0);
-    }
+    // Outside the frame when letterboxing. Callers paint black rather than the
+    // clamped edge pixel, which would smear the border across the bars.
+    outside = uniforms.videoLetterboxed > 0.5 &&
+              (screen.x < 0.0 || screen.x > 1.0 || screen.y < 0.0 || screen.y > 1.0);
 
     // Stand the landscape frame up: a quarter turn clockwise. Destination
     // (x, y) reads from source (y, 1 - x).
-    float2 texCoord = uniforms.videoRotated > 0.5
+    return uniforms.videoRotated > 0.5
         ? float2(screen.y, 1.0 - screen.x)
         : screen;
+}
+
+static inline float4 sampleVideo(texture2d<float> video,
+                                 float2 uv,
+                                 constant Uniforms &uniforms) {
+
+    constexpr sampler videoSampler(coord::normalized,
+                                   address::clamp_to_edge,
+                                   filter::linear);
+
+    bool outside = false;
+    float2 texCoord = videoTexCoord(uv, uniforms, outside);
+
+    if (outside) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
 
     return video.sample(videoSampler, texCoord);
 }

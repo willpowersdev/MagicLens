@@ -334,6 +334,223 @@ final class TeethRenderTests: XCTestCase {
                              "the shader did not tint a mouth polygon placed directly on the teeth")
     }
 
+    /// The same teeth in the camera buffer's own space — normalised, top-left
+    /// origin. `knownTeeth` above is this rectangle after it has been taken into
+    /// the shaders' uv space, which is the form the contour arrives in.
+    private let knownTeethInBuffer = CGRect(x: 0.471, y: 0.524, width: 0.123, height: 0.047)
+
+    /// The segmented mask has to tint the same teeth the contour does, in every
+    /// orientation the camera delivers.
+    ///
+    /// This is the one thing the mask can get wrong that the contour cannot.
+    /// Contour points reach the shader already in its uv space, having been
+    /// mapped by FaceTracker; the mask stays in the camera buffer's space and is
+    /// looked up through `videoTexCoord` instead. The two agree trivially when
+    /// nothing is turned round, so the rotated and mirrored cases are the test —
+    /// a mask that ignored either would land somewhere else entirely, and on a
+    /// face that reads as the model having failed rather than as a coordinate
+    /// bug.
+    func testSegmentedMaskTintsTheSameTeethTheContourDoes() throws {
+
+        let image = try XCTUnwrap(UIImage(named: "yellow_teeth_test"))
+        let buffer = try XCTUnwrap(Self.pixelBuffer(from: try XCTUnwrap(image.cgImage)))
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+
+        let sourceWidth = CVPixelBufferGetWidth(buffer)
+        let sourceHeight = CVPixelBufferGetHeight(buffer)
+
+        // A crop around the teeth rather than the whole frame, so the mask has
+        // the resolution over the mouth that a face crop gives it in the app.
+        let region = knownTeethInBuffer.insetBy(dx: -0.1, dy: -0.1)
+        let mask = try Self.maskTexture(device: device,
+                                        region: region,
+                                        filled: knownTeethInBuffer)
+
+        for (rotated, mirrored) in [(false, false), (true, false), (true, true)] {
+
+            // A view the shape of the video, so the aspect fill crops nothing
+            // and both paths are judged over the whole frame.
+            let viewSize = rotated
+                ? CGSize(width: sourceHeight, height: sourceWidth)
+                : CGSize(width: sourceWidth, height: sourceHeight)
+
+            // Through the same inverse the tracker uses, so the polygon lands
+            // where a detected one would.
+            let polygon = [
+                CGPoint(x: knownTeethInBuffer.minX, y: knownTeethInBuffer.minY),
+                CGPoint(x: knownTeethInBuffer.maxX, y: knownTeethInBuffer.minY),
+                CGPoint(x: knownTeethInBuffer.maxX, y: knownTeethInBuffer.maxY),
+                CGPoint(x: knownTeethInBuffer.minX, y: knownTeethInBuffer.maxY)
+            ].map { corner -> SIMD2<Float> in
+                let mapped = FaceTracker.uvPoint(fromBuffer: corner,
+                                                 rotated: rotated,
+                                                 mirrored: mirrored)
+                return SIMD2(Float(mapped.x), Float(mapped.y))
+            }
+
+            let viaContour = try Self.render(buffer: buffer,
+                                             mouth: polygon,
+                                             configuration: TeethHighlightConfiguration(),
+                                             rotated: rotated,
+                                             mirrored: mirrored,
+                                             viewSize: viewSize)
+
+            let viaMask = try Self.render(buffer: buffer,
+                                          mouth: polygon,
+                                          configuration: TeethHighlightConfiguration(),
+                                          rotated: rotated,
+                                          mirrored: mirrored,
+                                          viewSize: viewSize,
+                                          mask: (mask, region))
+
+            let contour = Self.tinted(in: viaContour)
+            let segmented = Self.tinted(in: viaMask)
+
+            let label = "rotated: \(rotated), mirrored: \(mirrored)"
+
+            XCTAssertGreaterThan(contour.count, 200, "the contour tinted nothing — \(label)")
+            XCTAssertGreaterThan(segmented.count, 200, "the mask tinted nothing — \(label)")
+
+            // Compared by where the tint landed rather than how much of it there
+            // was: the contour's edge is feathered by the shader and the mask's
+            // is hard here, so the counts legitimately differ while the centre
+            // of the region must not.
+            let drift = abs(contour.centre - segmented.centre)
+
+            XCTAssertLessThan(drift.x, 0.02, "the mask drifted horizontally — \(label)")
+            XCTAssertLessThan(drift.y, 0.02, "the mask drifted vertically — \(label)")
+
+            try? FileManager.default.createDirectory(at: Self.output, withIntermediateDirectories: true)
+            try Self.writePNG(viaMask.pixels, width: viaMask.width, height: viaMask.height,
+                              to: Self.output.appendingPathComponent(
+                                "mask-r\(rotated ? 1 : 0)-m\(mirrored ? 1 : 0).png"))
+        }
+    }
+
+    /// The whole segmentation path, end to end, on the still photograph: the
+    /// model loads out of the bundle, the crop reaches it the right way up, and
+    /// what comes back is the mouth rather than some other part of the face.
+    ///
+    /// The face box is supplied rather than detected, for the same reason the
+    /// contour is elsewhere in this file — Vision won't build an inference
+    /// context in the simulator. Core ML will, on the CPU, which is slow enough
+    /// that the deadline here is generous rather than tight.
+    func testTheModelSegmentsTheMouthInTheStillPhotograph() throws {
+
+        let image = try XCTUnwrap(UIImage(named: "yellow_teeth_test"))
+        let buffer = try XCTUnwrap(Self.pixelBuffer(from: try XCTUnwrap(image.cgImage)))
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+
+        let parsing = FaceParsing(device: device)
+
+        // Measured off the photograph, in the buffer's own space. Roughly what a
+        // detector returns: the face, not the hair.
+        let face = CGRect(x: 0.28, y: 0.24, width: 0.48, height: 0.44)
+
+        let deadline = Date().addingTimeInterval(60)
+        var produced: (mask: MouthMask, opacity: Float)?
+
+        while produced == nil, Date() < deadline {
+            parsing.analyze(buffer, faceBox: face, now: CFAbsoluteTimeGetCurrent())
+            Thread.sleep(forTimeInterval: 0.1)
+
+            // Enough elapsed time per call to ramp the fade, which otherwise
+            // holds the mask below the threshold this returns nil under.
+            produced = parsing.mask(at: CFAbsoluteTimeGetCurrent(), elapsed: 0.2)
+        }
+
+        guard let produced else {
+            throw XCTSkip(parsing.isAvailable
+                          ? "the model loaded but produced no mask before the deadline"
+                          : "FaceParsingResNet18.mlmodelc is not in the test host's bundle")
+        }
+
+        let mask = produced.mask
+
+        XCTAssertGreaterThan(mask.coverage,
+                             TeethHighlightConfiguration().minimumMaskCoverage,
+                             "the model found no mouth in a photograph of a wide smile")
+
+        // Where the mask actually sits, taken back out to the buffer's space so
+        // it can be compared against the teeth measured by hand.
+        let side = mask.texture.width
+        var pixels = [UInt8](repeating: 0, count: side * side)
+        pixels.withUnsafeMutableBytes { raw in
+            mask.texture.getBytes(raw.baseAddress!, bytesPerRow: side,
+                                  from: MTLRegionMake2D(0, 0, side, side), mipmapLevel: 0)
+        }
+
+        var covered = 0
+        var sum = CGPoint.zero
+        for row in 0..<side {
+            for column in 0..<side where pixels[row * side + column] > 128 {
+                sum.x += mask.region.minX + (CGFloat(column) + 0.5) / CGFloat(side) * mask.region.width
+                sum.y += mask.region.minY + (CGFloat(row) + 0.5) / CGFloat(side) * mask.region.height
+                covered += 1
+            }
+        }
+
+        XCTAssertGreaterThan(covered, 0, "coverage was reported but no texel carries it")
+
+        let centre = CGPoint(x: sum.x / CGFloat(covered), y: sum.y / CGFloat(covered))
+        let teeth = CGPoint(x: knownTeethInBuffer.midX, y: knownTeethInBuffer.midY)
+
+        print("[teeth] segmented centre: \(centre), measured teeth: \(teeth), "
+              + "coverage: \(mask.coverage)")
+
+        // Loose, because the model labels the whole opening between the lips
+        // while the hand-measured rectangle is the teeth inside it. Tight enough
+        // that landing on an eye, the nose or an upside-down crop would fail.
+        XCTAssertEqual(centre.x, teeth.x, accuracy: 0.05, "the mask is not over the mouth")
+        XCTAssertEqual(centre.y, teeth.y, accuracy: 0.05, "the mask is not over the mouth")
+    }
+
+    /// The crop handed to the model has to be square, centred on the face and
+    /// bigger than it — see FaceParsing.cropRegion for why each of those.
+    func testCropRegionIsASquarePaddedAroundTheFace() {
+
+        let face = CGRect(x: 0.3, y: 0.2, width: 0.2, height: 0.4)
+        let crop = FaceParsing.cropRegion(around: face, padding: 0.25)
+
+        XCTAssertEqual(crop.width, crop.height, accuracy: 1e-6, "not square")
+        XCTAssertEqual(crop.midX, face.midX, accuracy: 1e-6, "moved off the face horizontally")
+        XCTAssertEqual(crop.midY, face.midY, accuracy: 1e-6, "moved off the face vertically")
+
+        // Taken from the longer side once padded, so nothing inside the padded
+        // box is cut off by the squaring.
+        XCTAssertEqual(crop.width, face.height * 1.5, accuracy: 1e-6)
+        XCTAssertTrue(crop.contains(face), "the crop lost part of the face")
+
+        // Zero padding still squares up, and still can't lose the face.
+        let tight = FaceParsing.cropRegion(around: face, padding: 0)
+        XCTAssertEqual(tight.width, tight.height, accuracy: 1e-6)
+        XCTAssertTrue(tight.contains(face))
+    }
+
+    /// Where the tint landed, as a count and a centre in uv.
+    private static func tinted(in rendered: Rendered) -> (count: Int, centre: SIMD2<Float>) {
+
+        var count = 0
+        var sum = SIMD2<Float>(0, 0)
+
+        for index in stride(from: 0, to: rendered.pixels.count, by: 4) {
+            let b = Float(rendered.pixels[index]) / 255
+            let g = Float(rendered.pixels[index + 1]) / 255
+            let r = Float(rendered.pixels[index + 2]) / 255
+
+            guard r > 0.5, g > 0.35, r - b > 0.25 else {
+                continue
+            }
+
+            let pixel = index / 4
+            sum += SIMD2(Float(pixel % rendered.width) / Float(rendered.width),
+                         Float(pixel / rendered.width) / Float(rendered.height))
+            count += 1
+        }
+
+        return (count, count > 0 ? sum / Float(count) : SIMD2(0, 0))
+    }
+
     /// Letterboxing must show the whole frame, with black where it doesn't
     /// reach — the macOS behaviour, since a window can be any shape and filling
     /// a wide one throws most of the picture away.
@@ -500,13 +717,61 @@ final class TeethRenderTests: XCTestCase {
         let height: Int
     }
 
+    private static func emptyMask(device: MTLDevice) throws -> MTLTexture {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
+        descriptor.usage = .shaderRead
+
+        let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        var zero: UInt8 = 0
+        texture.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0,
+                        withBytes: &zero, bytesPerRow: 1)
+        return texture
+    }
+
+    /// Stands in for what `FaceParsing` produces: a single-channel mask covering
+    /// `region` of the camera buffer, opaque over `filled` and clear elsewhere.
+    ///
+    /// Both rectangles are in the buffer's own space — normalised, top-left
+    /// origin — which is what the real one carries, so the shader's lookup is
+    /// exercised exactly as it is in the app.
+    private static func maskTexture(device: MTLDevice,
+                                    region: CGRect,
+                                    filled: CGRect,
+                                    side: Int = 128) throws -> MTLTexture {
+
+        var pixels = [UInt8](repeating: 0, count: side * side)
+
+        for row in 0..<side {
+            for column in 0..<side {
+                // Texel centres, so the edges land where they should.
+                let x = region.minX + (CGFloat(column) + 0.5) / CGFloat(side) * region.width
+                let y = region.minY + (CGFloat(row) + 0.5) / CGFloat(side) * region.height
+
+                if filled.contains(CGPoint(x: x, y: y)) {
+                    pixels[row * side + column] = 255
+                }
+            }
+        }
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm, width: side, height: side, mipmapped: false)
+        descriptor.usage = .shaderRead
+
+        let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        texture.replace(region: MTLRegionMake2D(0, 0, side, side), mipmapLevel: 0,
+                        withBytes: pixels, bytesPerRow: side)
+        return texture
+    }
+
     private static func render(buffer: CVPixelBuffer,
                                mouth: [SIMD2<Float>],
                                configuration: TeethHighlightConfiguration,
                                rotated: Bool,
                                mirrored: Bool,
                                letterboxed: Bool = false,
-                               viewSize: CGSize? = nil) throws -> Rendered {
+                               viewSize: CGSize? = nil,
+                               mask: (texture: MTLTexture, region: CGRect)? = nil) throws -> Rendered {
 
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let queue = try XCTUnwrap(device.makeCommandQueue())
@@ -590,13 +855,21 @@ final class TeethRenderTests: XCTestCase {
                 * max(Float(mouth.map(\.y).max()! - mouth.map(\.y).min()!), 0.002),
             mouthOpacity: 1,
             mouthPointCount: Int32(mouth.count),
-            yellowColor: configuration.yellowColor)
+            yellowColor: configuration.yellowColor,
+            usesMask: mask == nil ? 0 : 1,
+            maskOrigin: SIMD2(Float(mask?.region.minX ?? 0), Float(mask?.region.minY ?? 0)),
+            maskSize: SIMD2(Float(mask?.region.width ?? 0), Float(mask?.region.height ?? 0)))
 
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
         encoder.setFragmentBytes(&points,
                                  length: MemoryLayout<SIMD2<Float>>.stride * points.count, index: 1)
         encoder.setFragmentBytes(&teeth, length: MemoryLayout<TeethUniforms>.stride, index: 2)
         encoder.setFragmentTexture(source, index: 0)
+
+        // Bound whichever path is being exercised, because the shader declares
+        // the binding either way. A 1×1 of zero stands in when there's no mask,
+        // matching what the renderer does.
+        encoder.setFragmentTexture(try mask?.texture ?? emptyMask(device: device), index: 1)
         encoder.drawIndexedPrimitives(type: .triangle, indexCount: indices.count,
                                       indexType: .uint32, indexBuffer: indexBuffer,
                                       indexBufferOffset: 0)

@@ -109,10 +109,42 @@ final class FaceTracker {
 
     private var eyeTarget: TrackedFace?
     private var lastLandmarks: CFAbsoluteTime = 0
+
+    /// The face in the camera buffer's own space — normalised, top-left origin,
+    /// unsmoothed.
+    ///
+    /// Separate from `tracked` because it is for a different consumer: Core ML
+    /// crops the buffer, so it needs the box in buffer coordinates, and the uv
+    /// box has already been through the rotation, the mirroring and the fit to
+    /// the view. Going back the other way would mean inverting all three to
+    /// recover a number that was in hand to begin with.
+    ///
+    /// Unsmoothed because the crop is padded well past the box; smoothing would
+    /// buy nothing a 25% margin doesn't already cover.
+    private var storedBufferFace: CGRect?
+    private var lastBufferFace: CFAbsoluteTime = 0
     private var lastLandmarkAttempt: CFAbsoluteTime = 0
     private var visionInFlight = false
     private var storedConfiguration = TeethHighlightConfiguration()
     private var loggedMouth = false
+
+    /// The latest face box in the camera buffer's own space, or nil when it has
+    /// gone stale. Fed to `FaceParsing`, which crops that buffer.
+    ///
+    /// Filled from whichever detector ran most recently: the hardware's metadata
+    /// boxes where they exist, and Vision's own bounding box otherwise. Both
+    /// measure the same buffer, and a Mac has only the second.
+    func bufferFaceBox(at now: CFAbsoluteTime) -> CGRect? {
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let storedBufferFace, now - lastBufferFace <= Self.graceSeconds else {
+            return nil
+        }
+
+        return storedBufferFace
+    }
 
     /// The current face, advanced to `now`. Called once per rendered frame.
     func face(at now: CFAbsoluteTime, elapsed: Float) -> TrackedFace {
@@ -201,6 +233,11 @@ final class FaceTracker {
 
         lock.lock()
         defer { lock.unlock() }
+
+        // Metadata bounds are already in the buffer's space, which is exactly
+        // what the segmenter's crop wants.
+        storedBufferFace = largest.bounds
+        lastBufferFace = now
 
         var found = TrackedFace.none
         found.center = SIMD2(Float(box.midX), Float(box.midY))
@@ -378,6 +415,15 @@ final class FaceTracker {
         let rightPupil = uv(landmarks.rightPupil) ?? rightEye
 
         lock.lock()
+
+        // Vision counts up from the bottom left; the buffer space the segmenter
+        // crops in counts down from the top left. A Mac has no metadata face
+        // output, so this is the only thing that fills it there.
+        storedBufferFace = CGRect(x: box.minX,
+                                  y: 1 - box.maxY,
+                                  width: box.width,
+                                  height: box.height)
+        lastBufferFace = CFAbsoluteTimeGetCurrent()
 
         var found = TrackedFace.none
         found.leftEye = leftEye

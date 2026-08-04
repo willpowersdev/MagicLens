@@ -50,6 +50,18 @@ struct TeethUniforms {
     var mouthOpacity: Float
     var mouthPointCount: Int32
     var yellowColor: SIMD3<Float>
+
+    // The segmented mask, when there is one. Appended rather than woven in
+    // among the fields above so the existing offsets don't move — Swift and
+    // Metal have to agree on this layout byte for byte, and `yellowColor`
+    // being a float3 means both sides are already padding it.
+
+    /// 1 when the mask is bound and worth reading, 0 to use the polygon.
+    var usesMask: Float
+    /// The part of the camera buffer the mask covers, in the space
+    /// `videoTexCoord` returns.
+    var maskOrigin: SIMD2<Float>
+    var maskSize: SIMD2<Float>
 }
 
 /// Draws a full screen quad textured with the latest camera frame and run
@@ -299,11 +311,38 @@ final class Renderer: NSObject, MTKViewDelegate {
         startDate = Date()
     }
 
-    /// Binds the inner-lip contour and the teeth settings.
+    /// Stands in for the mask when there isn't one, so the fragment shader's
+    /// texture binding is never empty. Reading it would give zero coverage
+    /// everywhere; `usesMask` means nothing reads it.
+    private lazy var emptyMaskTexture: MTLTexture? = {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm,
+                                                                  width: 1,
+                                                                  height: 1,
+                                                                  mipmapped: false)
+        descriptor.usage = .shaderRead
+
+        let texture = device.makeTexture(descriptor: descriptor)
+        var zero: UInt8 = 0
+        texture?.replace(region: MTLRegionMake2D(0, 0, 1, 1),
+                         mipmapLevel: 0,
+                         withBytes: &zero,
+                         bytesPerRow: 1)
+        return texture
+    }()
+
+    /// Binds the mouth — segmented mask where there is one, inner-lip contour
+    /// where there isn't — and the teeth settings.
     ///
-    /// The feather is scaled by the face rather than fixed, so the soft edge
-    /// stays proportionate whether someone is close to the camera or far away.
+    /// Both are bound every time rather than one or the other, because the
+    /// choice belongs to the shader: `usesMask` decides, and the unused path
+    /// costs a texture binding it was going to do anyway.
+    ///
+    /// The polygon feather is scaled by the face rather than fixed, so the soft
+    /// edge stays proportionate whether someone is close to the camera or far
+    /// away. The mask needs no equivalent — its edge was blurred in when it was
+    /// made, in mask pixels, which scale with the face for free.
     private func bindMouth(face: TrackedFace,
+                           mask: (mask: MouthMask, opacity: Float)?,
                            scale: SIMD2<Float>,
                            to encoder: MTLRenderCommandEncoder) {
 
@@ -316,6 +355,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             ? [SIMD2<Float>(0, 0)]
             : face.mouth.map { Self.videoPointToView($0, scale: scale) }
 
+        // Left in the camera buffer's space rather than mapped into view space
+        // like the polygon, because the shader looks it up through
+        // videoTexCoord — the same mapping it samples the video with.
+        let region = mask?.mask.region ?? .zero
+
         var teeth = TeethUniforms(
             minimumBrightness: settings.minimumBrightness,
             maximumSaturation: settings.maximumSaturation,
@@ -326,9 +370,13 @@ final class Renderer: NSObject, MTKViewDelegate {
             // came out around ten times the height of the opening, so the mask
             // never reached full strength anywhere and the tint was patchy.
             edgeFeather: settings.edgeFeather * max(face.mouthHeight / scale.y, 0.002),
-            mouthOpacity: face.mouthOpacity,
+            // Whichever source is driving carries its own fade.
+            mouthOpacity: mask?.opacity ?? face.mouthOpacity,
             mouthPointCount: Int32(face.mouth.count),
-            yellowColor: settings.yellowColor)
+            yellowColor: settings.yellowColor,
+            usesMask: mask == nil ? 0 : 1,
+            maskOrigin: SIMD2(Float(region.minX), Float(region.minY)),
+            maskSize: SIMD2(Float(region.width), Float(region.height)))
 
         encoder.setFragmentBytes(&mouth,
                                  length: MemoryLayout<SIMD2<Float>>.stride * mouth.count,
@@ -336,6 +384,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.setFragmentBytes(&teeth,
                                  length: MemoryLayout<TeethUniforms>.stride,
                                  index: 2)
+        encoder.setFragmentTexture(mask?.mask.texture ?? emptyMaskTexture, index: 1)
     }
 
     // MARK: - MTKViewDelegate
@@ -359,6 +408,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         let elapsed = lastDrawTime.map { Float(max(0, min(0.25, now - $0))) } ?? 0
         lastDrawTime = now
         let face = feed.faces.face(at: now, elapsed: elapsed)
+
+        // Nil until the model has produced something, and again whenever it
+        // goes stale — which is what hands the mouth back to the contour.
+        let mouthMask = feed.mouths.mask(at: now, elapsed: elapsed)
 
         // Video space and view space only coincide when the video exactly fills
         // the view. Worked out once here so the effect draw, the overlay draw
@@ -422,7 +475,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Bound for both draws and both branches. Only the teeth effect and the
         // debug overlay read them, but leaving them unbound on the gradient path
         // would hand the overlay whatever happened to be there.
-        bindMouth(face: face, scale: scale, to: encoder)
+        bindMouth(face: face, mask: mouthMask, scale: scale, to: encoder)
 
         encoder.drawIndexedPrimitives(type: .triangle,
                                       indexCount: Self.indexData.count,
@@ -456,7 +509,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.setFragmentBytes(&overlayUniforms,
                                      length: MemoryLayout<Uniforms>.stride,
                                      index: 0)
-            bindMouth(face: face, scale: scale, to: encoder)
+            bindMouth(face: face, mask: mouthMask, scale: scale, to: encoder)
             encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: Self.indexData.count,
                                           indexType: .uint32,

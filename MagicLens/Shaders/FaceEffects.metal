@@ -90,7 +90,55 @@ struct TeethUniforms {
     float mouthOpacity;
     int mouthPointCount;
     float3 yellowColor;
+
+    /// 1 when the segmented mask is bound and worth reading, 0 to fall back to
+    /// the inner-lip polygon above.
+    float usesMask;
+    /// The part of the camera buffer the mask covers, in the space
+    /// videoTexCoord returns.
+    float2 maskOrigin;
+    float2 maskSize;
 };
+
+/// Coverage from the segmented mask: 1 well inside the mouth, 0 outside.
+///
+/// The mask was traced on the camera buffer, so the lookup goes through
+/// videoTexCoord rather than working from `uv` directly — the same mapping the
+/// video itself is sampled with, which is what keeps the two registered under
+/// rotation and mirroring.
+///
+/// Its soft edge was blurred in when it was made, so there is nothing to
+/// smoothstep here.
+static float segmentedMouth(float2 uv,
+                            constant Uniforms &uniforms,
+                            constant TeethUniforms &teeth,
+                            texture2d<float> mouthMask) {
+
+    constexpr sampler maskSampler(coord::normalized,
+                                  address::clamp_to_zero,
+                                  filter::linear);
+
+    if (teeth.maskSize.x <= 0.0 || teeth.maskSize.y <= 0.0) {
+        return 0.0;
+    }
+
+    bool outside = false;
+    float2 inVideo = videoTexCoord(uv, uniforms, outside);
+
+    if (outside) {
+        return 0.0;
+    }
+
+    float2 inMask = (inVideo - teeth.maskOrigin) / teeth.maskSize;
+
+    // The crop is a small part of the frame, so this is where the overwhelming
+    // majority of fragments leave — before the texture read, not after it.
+    if (inMask.x < 0.0 || inMask.x > 1.0 || inMask.y < 0.0 || inMask.y > 1.0) {
+        return 0.0;
+    }
+
+    return mouthMask.sample(maskSampler, inMask).r;
+}
 
 /// Signed distance from `uv` to the mouth polygon: negative inside.
 ///
@@ -127,15 +175,25 @@ static float mouthDistance(float2 uv,
 
 /// Monochrome everywhere, with likely teeth picked out in yellow.
 ///
-/// A brightness-and-saturation heuristic confined to the gap between the lips —
-/// not tooth recognition. Anything bright and near-neutral inside that contour
-/// is tinted, which in practice can include a bright tongue, dental work and
-/// specular highlights on wet lips.
+/// Where the mouth is comes from one of two places. The Core ML face-parsing
+/// model labels the gap between the lips directly, and is used whenever it has
+/// produced something recent; Vision's inner-lip contour is the fallback for
+/// when it hasn't — the first frames after launch, a head turned too far, or a
+/// build with no model in the bundle.
+///
+/// What gets tinted inside that region is the same either way: a
+/// brightness-and-saturation heuristic, not tooth recognition. Anything bright
+/// and near-neutral is tinted, which in practice can include a bright tongue,
+/// dental work and specular highlights on wet lips. The mask makes that
+/// heuristic's job easier rather than replacing it — the region it has to
+/// discriminate within is the mouth opening rather than a contour drawn round
+/// the lips and eroded inwards in the hope of clearing them.
 fragment float4 fragment_teeth(VertexOut interpolated [[stage_in]],
                                constant Uniforms &uniforms [[buffer(0)]],
                                constant float2 *mouthPoints [[buffer(1)]],
                                constant TeethUniforms &teeth [[buffer(2)]],
-                               texture2d<float> video [[texture(0)]]) {
+                               texture2d<float> video [[texture(0)]],
+                               texture2d<float> mouthMask [[texture(1)]]) {
 
     float2 uv = interpolated.texCoord;
     float3 colour = sampleVideo(video, uv, uniforms).rgb;
@@ -144,19 +202,33 @@ fragment float4 fragment_teeth(VertexOut interpolated [[stage_in]],
     float luma = dot(colour, float3(0.2126, 0.7152, 0.0722));
     float3 grey = float3(luma);
 
-    if (teeth.mouthPointCount < 3 || teeth.mouthOpacity <= 0.001) {
+    if (teeth.mouthOpacity <= 0.001) {
         return float4(grey, 1.0);
     }
 
-    float distance = mouthDistance(uv, mouthPoints, teeth.mouthPointCount);
+    float mask;
 
-    // Outside by more than the feather: the overwhelming majority of the frame
-    // leaves here, having done one polygon test and no colour work.
-    if (distance > teeth.edgeFeather) {
-        return float4(grey, 1.0);
+    if (teeth.usesMask > 0.5) {
+        mask = segmentedMouth(uv, uniforms, teeth, mouthMask);
+
+        if (mask <= 0.001) {
+            return float4(grey, 1.0);
+        }
+    } else {
+        if (teeth.mouthPointCount < 3) {
+            return float4(grey, 1.0);
+        }
+
+        float distance = mouthDistance(uv, mouthPoints, teeth.mouthPointCount);
+
+        // Outside by more than the feather: the overwhelming majority of the
+        // frame leaves here, having done one polygon test and no colour work.
+        if (distance > teeth.edgeFeather) {
+            return float4(grey, 1.0);
+        }
+
+        mask = 1.0 - smoothstep(-teeth.edgeFeather, teeth.edgeFeather, distance);
     }
-
-    float mask = 1.0 - smoothstep(-teeth.edgeFeather, teeth.edgeFeather, distance);
 
     // Brightness and saturation from the original colour, not the grey — the
     // whole test depends on saturation, which grey has thrown away.
@@ -208,7 +280,8 @@ static float eyeMarker(float2 uv, float2 point, constant Uniforms &uniforms, flo
 fragment float4 fragment_facedebug(VertexOut interpolated [[stage_in]],
                                    constant Uniforms &uniforms [[buffer(0)]],
                                    constant float2 *mouthPoints [[buffer(1)]],
-                                   constant TeethUniforms &teeth [[buffer(2)]]) {
+                                   constant TeethUniforms &teeth [[buffer(2)]],
+                                   texture2d<float> mouthMask [[texture(1)]]) {
 
     float2 uv = interpolated.texCoord;
     float4 result = float4(0.0);
@@ -257,14 +330,29 @@ fragment float4 fragment_facedebug(VertexOut interpolated [[stage_in]],
                      clamp(pupils, 0.0, 1.0) * uniforms.eyePresence);
     }
 
-    // The eroded inner lip contour, drawn from the same points the teeth
-    // shader tests against. Without this a mask in the wrong place is
+    // Wherever the mouth is coming from, drawn from exactly what the teeth
+    // shader reads. Without this a region in the wrong place is
     // indistinguishable from teeth the heuristic simply failed to find.
-    if (teeth.mouthPointCount >= 3 && teeth.mouthOpacity > 0.001) {
-        float distance = abs(mouthDistance(uv, mouthPoints, teeth.mouthPointCount));
-        float onContour = 1.0 - smoothstep(0.0, 2.5 / max(uniforms.resolution.y, 1.0), distance);
+    //
+    // Two colours for two sources, so which one is driving is obvious rather
+    // than merely inferable: pink for Vision's contour, cyan for the model's
+    // mask. Seeing it fall back mid-session is the point.
+    if (teeth.mouthOpacity > 0.001) {
 
-        result = mix(result, float4(1.0, 0.35, 0.8, 1.0), onContour * teeth.mouthOpacity);
+        if (teeth.usesMask > 0.5) {
+            // Filled rather than outlined — the mask has a soft edge, and how
+            // far it spreads is as much worth seeing as where it sits.
+            float coverage = segmentedMouth(uv, uniforms, teeth, mouthMask);
+
+            result = mix(result, float4(0.25, 0.9, 1.0, 1.0),
+                         coverage * 0.65 * teeth.mouthOpacity);
+
+        } else if (teeth.mouthPointCount >= 3) {
+            float distance = abs(mouthDistance(uv, mouthPoints, teeth.mouthPointCount));
+            float onContour = 1.0 - smoothstep(0.0, 2.5 / max(uniforms.resolution.y, 1.0), distance);
+
+            result = mix(result, float4(1.0, 0.35, 0.8, 1.0), onContour * teeth.mouthOpacity);
+        }
     }
 
     return result;

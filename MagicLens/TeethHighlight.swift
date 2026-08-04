@@ -61,6 +61,39 @@ struct TeethHighlightConfiguration: Sendable, Equatable {
     /// is where the remaining margin comes from.
     var minimumMouthArea: Float = 0.0006
 
+    // MARK: - Core ML mask
+    //
+    // Settings for the segmented mask, which supersedes the contour above when
+    // the model is loaded. The contour settings stay because it remains the
+    // fallback — see FaceParsing.
+
+    /// How far past the detected face box to crop before segmenting, as a
+    /// fraction of the box. See `FaceParsing.cropRegion`.
+    var maskCropPadding: Float = 0.25
+
+    /// Radius, in mask pixels, of the blur that softens the mask edge. The mask
+    /// is 512 across a padded head, so a mouth spans on the order of a hundred
+    /// pixels and single digits here is a few per cent of it.
+    var maskFeather: Float = 3
+
+    /// Fraction of the cropped square that must come back as mouth before the
+    /// tint appears — the segmented counterpart to `minimumMouthArea`, and
+    /// measured against the crop rather than the face box because that is what
+    /// the model returns.
+    ///
+    /// A shut mouth has no opening to label, so unlike Vision's contour this
+    /// collapses to zero rather than to a sliver, and the threshold only has to
+    /// clear the model's own noise.
+    var minimumMaskCoverage: Float = 0.0004
+
+    /// Inferences per second. The mask is only sampled through a blur, so it
+    /// carries between frames better than a contour does.
+    var maskUpdatesPerSecond: Float = 15
+
+    /// How long a mask stays usable. Shorter than the face box's grace period,
+    /// because a head turn invalidates a mask while the box is still good.
+    var maskGraceSeconds: Float = 0.4
+
     /// Everything forced into a usable range, so a bad value degrades rather
     /// than producing an inverted or never-satisfied test.
     var sanitized: TeethHighlightConfiguration {
@@ -77,6 +110,12 @@ struct TeethHighlightConfiguration: Sendable, Equatable {
         copy.landmarkResponsiveness = max(0.1, min(landmarkResponsiveness, 60))
         copy.updatesPerSecond = max(1, min(updatesPerSecond, 60))
         copy.minimumMouthArea = max(0, min(minimumMouthArea, 1))
+
+        copy.maskCropPadding = max(0, min(maskCropPadding, 2))
+        copy.maskFeather = max(0, min(maskFeather, 64))
+        copy.minimumMaskCoverage = max(0, min(minimumMaskCoverage, 1))
+        copy.maskUpdatesPerSecond = max(1, min(maskUpdatesPerSecond, 60))
+        copy.maskGraceSeconds = max(0.05, min(maskGraceSeconds, 5))
 
         return copy
     }

@@ -52,6 +52,8 @@
 		EB0006000000000000000002 /* FaceTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0006000000000000000001 /* FaceTracker.swift */; };
 		EB0006000000000000000004 /* FaceEffects.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0006000000000000000003 /* FaceEffects.metal */; };
 		EB0007000000000000000002 /* TeethHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0007000000000000000001 /* TeethHighlight.swift */; };
+		EB0008000000000000000002 /* FaceParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0008000000000000000001 /* FaceParsing.swift */; };
+		EB0008000000000000000012 /* FaceParsingResNet18.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = EB0008000000000000000011 /* FaceParsingResNet18.mlpackage */; };
 		EB0007000000000000000004 /* TeethHighlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0007000000000000000003 /* TeethHighlightTests.swift */; };
 		EB00AC000000000000000002 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB00AC000000000000000001 /* Platform.swift */; };
 		EB00AC000000000000000003 /* Gradient.metal in Sources */ = {isa = PBXBuildFile; fileRef = EB0001000000000000000001 /* Gradient.metal */; };
@@ -81,6 +83,8 @@
 		EB00AC00000000000000001B /* RecordingsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0003000000000000000005 /* RecordingsGrid.swift */; };
 		EB00AC00000000000000001C /* FaceTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0006000000000000000001 /* FaceTracker.swift */; };
 		EB00AC00000000000000001D /* TeethHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0007000000000000000001 /* TeethHighlight.swift */; };
+		EB0008000000000000000003 /* FaceParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0008000000000000000001 /* FaceParsing.swift */; };
+		EB0008000000000000000013 /* FaceParsingResNet18.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = EB0008000000000000000011 /* FaceParsingResNet18.mlpackage */; };
 		EB00AC00000000000000001E /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB00AC000000000000000001 /* Platform.swift */; };
 		EB00AC00000000000000001F /* CameraFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCB7706263C012700709455 /* CameraFeed.swift */; };
 		EB00AC000000000000000020 /* Array+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCB771C263D0ADF00709455 /* Array+Helpers.swift */; };
@@ -170,6 +174,8 @@
 		EB0006000000000000000001 /* FaceTracker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FaceTracker.swift; sourceTree = "<group>"; };
 		EB0006000000000000000003 /* FaceEffects.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = FaceEffects.metal; sourceTree = "<group>"; };
 		EB0007000000000000000001 /* TeethHighlight.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TeethHighlight.swift; sourceTree = "<group>"; };
+		EB0008000000000000000001 /* FaceParsing.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FaceParsing.swift; sourceTree = "<group>"; };
+		EB0008000000000000000011 /* FaceParsingResNet18.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = FaceParsingResNet18.mlpackage; sourceTree = "<group>"; };
 		EB0007000000000000000003 /* TeethHighlightTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TeethHighlightTests.swift; sourceTree = "<group>"; };
 		EB00AC000000000000000001 /* Platform.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
 		EB00AC00000000000000002F /* MagicLens.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MagicLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -246,12 +252,14 @@
 				EB0003000000000000000005 /* RecordingsGrid.swift */,
 				EB0006000000000000000001 /* FaceTracker.swift */,
 				EB0007000000000000000001 /* TeethHighlight.swift */,
+				EB0008000000000000000001 /* FaceParsing.swift */,
 				EB00AC000000000000000001 /* Platform.swift */,
 				CDCB7706263C012700709455 /* CameraFeed.swift */,
 				CDCB76D5263C00D400709455 /* Info.plist */,
 				CDCB7716263C01B900709455 /* Assets.xcassets */,
 				CDCB771E263D0AF600709455 /* Extensions */,
 				CDCB76F7263C012700709455 /* Shaders */,
+				EB0008000000000000000021 /* Models */,
 			);
 			path = MagicLens;
 			sourceTree = "<group>";
@@ -326,6 +334,14 @@
 				EB00AC000000000000000031 /* MagicLensMac.entitlements */,
 			);
 			path = MagicLensMac;
+			sourceTree = "<group>";
+		};
+		EB0008000000000000000021 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				EB0008000000000000000011 /* FaceParsingResNet18.mlpackage */,
+			);
+			path = Models;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -536,6 +552,8 @@
 				EB0003000000000000000006 /* RecordingsGrid.swift in Sources */,
 				EB0006000000000000000002 /* FaceTracker.swift in Sources */,
 				EB0007000000000000000002 /* TeethHighlight.swift in Sources */,
+				EB0008000000000000000002 /* FaceParsing.swift in Sources */,
+				EB0008000000000000000012 /* FaceParsingResNet18.mlpackage in Sources */,
 				EB00AC000000000000000002 /* Platform.swift in Sources */,
 				CDCB7715263C012700709455 /* CameraFeed.swift in Sources */,
 				CDCB771D263D0ADF00709455 /* Array+Helpers.swift in Sources */,
@@ -590,6 +608,8 @@
 				EB00AC00000000000000001B /* RecordingsGrid.swift in Sources */,
 				EB00AC00000000000000001C /* FaceTracker.swift in Sources */,
 				EB00AC00000000000000001D /* TeethHighlight.swift in Sources */,
+				EB0008000000000000000003 /* FaceParsing.swift in Sources */,
+				EB0008000000000000000013 /* FaceParsingResNet18.mlpackage in Sources */,
 				EB00AC00000000000000001E /* Platform.swift in Sources */,
 				EB00AC00000000000000001F /* CameraFeed.swift in Sources */,
 				EB00AC000000000000000020 /* Array+Helpers.swift in Sources */,

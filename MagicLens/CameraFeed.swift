@@ -34,6 +34,25 @@ final class CameraFeed: NSObject {
     /// The shared face tracker, fed from the session's metadata output.
     let faces = FaceTracker()
 
+    /// Segments the mouth with Core ML, cropping to the box `faces` is holding.
+    /// Produces nothing when the model is absent, which is what leaves the
+    /// tracker's inner-lip contour in place as the fallback.
+    let mouths: FaceParsing
+
+    /// Tuning for the teeth effect.
+    ///
+    /// Both halves of it need the same settings and each keeps its own copy, so
+    /// this exists to stop one being tuned while the other is left behind —
+    /// which would show up as the effect changing character the moment it fell
+    /// back from the mask to the contour.
+    var teethConfiguration: TeethHighlightConfiguration {
+        get { faces.configuration }
+        set {
+            faces.configuration = newValue
+            mouths.configuration = newValue
+        }
+    }
+
     /// AVCaptureSession configuration and start/stop must stay off the main
     /// thread — they block for as long as the hardware takes to come up.
     private let sessionQueue = DispatchQueue(label: "com.ion6.MagicLens.session")
@@ -95,6 +114,8 @@ final class CameraFeed: NSObject {
     }
 
     init(metalDevice: MTLDevice) {
+        self.mouths = FaceParsing(device: metalDevice)
+
         super.init()
 
         // Created once, up front: rotating the camera rebuilds the session, and
@@ -409,10 +430,20 @@ extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate,
         CVMetalTextureCacheFlush(textureCache, 0)
 
         // Offered every frame; the tracker decides how few to actually run.
+        let now = CFAbsoluteTimeGetCurrent()
+
         faces.analyze(pixelBuffer,
                       bufferIsLandscape: landscape,
                       mirrored: mirrored,
-                      now: CFAbsoluteTimeGetCurrent())
+                      now: now)
+
+        // Offered the same way, and throttled on its own clock. It crops to the
+        // box the tracker is holding, so on the very first frames — before any
+        // detector has reported — there is nothing to crop to and it does
+        // nothing.
+        mouths.analyze(pixelBuffer,
+                       faceBox: faces.bufferFaceBox(at: now),
+                       now: now)
     }
 }
 
