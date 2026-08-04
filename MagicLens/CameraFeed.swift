@@ -302,7 +302,16 @@ final class CameraFeed: NSObject {
             // device or format doesn't support it, which leaves the frame
             // sideways with nothing to show for it; sampling always applies.
             textureLock.lock()
+            #if os(macOS)
+            // A Mac's camera points at whoever is using it, whether that's the
+            // built-in one, a webcam sitting on the display, or an iPhone over
+            // Continuity — and most of those report no position at all rather
+            // than `.front`. So mirror unless the camera explicitly faces away,
+            // which is what FaceTime and Photo Booth do.
+            frontFacing = device.position != .back
+            #else
             frontFacing = device.position == .front
+            #endif
             sessionClock = session.synchronizationClock
             textureLock.unlock()
 
