@@ -115,16 +115,15 @@ final class FaceTracker {
     ///
     /// This was the largest single source of tracking lag: at a twelfth of a
     /// second a reading was up to 83ms old before anything downstream saw it,
-    /// and no amount of prediction recovers detail that was never sampled. At
-    /// a fortieth it is 25ms, close enough to a frame that the prediction has
-    /// little left to cover.
+    /// and nothing recovers detail that was never sampled. At a thirtieth it
+    /// is 33ms, about two frames.
     ///
     /// A ceiling rather than a schedule — one request runs at a time, so this
     /// asks for a rate rather than promising one, and a frame that takes
     /// longer defers the next instead of queueing behind itself. Whether the
     /// hardware actually keeps up is a question for a device, not for this
     /// constant.
-    static let landmarkInterval = 1.0 / 40.0
+    static let landmarkInterval = 1.0 / 30.0
 
     /// Landmarks go stale faster than the box does — a head turn invalidates
     /// them while the face is still perfectly well tracked.
