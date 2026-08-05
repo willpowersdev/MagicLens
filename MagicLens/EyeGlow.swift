@@ -147,15 +147,29 @@ struct EyeGlowConfiguration: Sendable, Equatable {
     /// How far to chase a new landmark reading in one frame *at 60fps*, while
     /// the head is moving. The actual per-frame figure comes from elapsed time
     /// — see `follow(forElapsed:motion:)`.
-    var landmarkSmoothing: Float = 0.45
+    ///
+    /// One, which is no smoothing at all: while the head is moving the drawn
+    /// position is the predicted one, taken whole.
+    ///
+    /// Affordable only because the prediction starts from when the frame was
+    /// taken rather than from when Vision finished, so what it is taking whole
+    /// is where the eyes are rather than where they were. Jitter is left
+    /// entirely to the still figure below, which is what a motionless head is
+    /// filtered by — there is nothing else damping anything now.
+    var landmarkSmoothing: Float = 1.0
 
     /// The same, while the head is still.
     ///
-    /// Deliberately far slower. One rate cannot serve both: quick enough to
-    /// keep up with a turning head passes Vision's frame-to-frame jitter
-    /// straight through, and slow enough to sit still lags. Which failure
-    /// matters depends entirely on whether anything is moving.
-    var stillSmoothing: Float = 0.08
+    /// Slower, but nothing like as slow as it was. At 0.08 this was a fifth of
+    /// a second's time constant, and since it applies whenever the motion gate
+    /// is anything short of certain, it was most of what made the tracking feel
+    /// sluggish — the gate does not have to be wrong for long to be felt.
+    ///
+    /// A mild filter is enough for what it is fighting. The landmark wander is
+    /// a few pixels; halving it is plenty, and it does not need a fifth of a
+    /// second to do that. The gate being occasionally wrong then costs almost
+    /// nothing, which is what makes the tighter thresholds below affordable.
+    var stillSmoothing: Float = 0.30
 
     /// Below this speed, in uv per second, the eyes count as still.
     ///
@@ -164,15 +178,41 @@ struct EyeGlowConfiguration: Sendable, Equatable {
     /// as a real velocity, and everything downstream believes it: the glow is
     /// projected along it, and the trail smears in a fresh random direction
     /// each frame.
-    var stillnessThreshold: Float = 0.05
+    ///
+    /// The same wander across a shorter gap implies a higher speed, so raising
+    /// the detection rate raises the noise floor this has to clear — which is
+    /// how it climbed from 0.05 to 0.18 as the rate went from 12 to 40, and how
+    /// it ended up above real movement. An eye is about 0.06 uv across, so 0.18
+    /// is an eye-width every third of a second: unmistakably moving, and being
+    /// filtered as though it were not.
+    ///
+    /// The answer is not a higher threshold but a quieter measurement. With the
+    /// velocity averaged across a few readings the noise falls by
+    /// `velocityNoiseFactor` and this can sit below anything anyone would call
+    /// movement. `testStillnessSurvivesTheSamplingRate` holds it there.
+    var stillnessThreshold: Float = 0.065
 
-    /// At and above this speed they count as fully moving.
-    var motionThreshold: Float = 0.40
+    /// At and above this speed they count as fully moving. Low enough that an
+    /// unhurried movement — an eye crossing its own width in half a second —
+    /// is most of the way out of the still filter rather than barely into it.
+    var motionThreshold: Float = 0.18
 
-    /// How far ahead of the landmarks to draw, on top of cancelling their
-    /// measured age. Covers what the age can't see: Vision's own processing,
-    /// and the frame's trip to the display.
-    var predictionSeconds: Float = 0.02
+    /// How much of a new velocity reading to take, per detection.
+    ///
+    /// Velocity is a difference between two positions divided by a very short
+    /// interval, which multiplies the landmark noise rather than averaging it
+    /// away — at a fortieth of a second, a wander of 0.003 uv reads as 0.12 uv
+    /// per second from a head that has not moved at all. Averaging across a few
+    /// readings costs a few tens of milliseconds in noticing that a movement
+    /// has begun, and buys a velocity that can be believed.
+    var velocitySmoothing: Float = 0.3
+
+    /// What the averaging above does to the noise: the standard deviation of an
+    /// exponential average with weight `a` is `sqrt(a / (2 - a))` of the input's.
+    var velocityNoiseFactor: Float {
+        let a = velocitySmoothing.clamped(to: 0.01...1)
+        return (a / (2 - a)).squareRoot()
+    }
 
     var minimumTrackingConfidence: Float = 0.45
 
@@ -214,11 +254,11 @@ struct EyeGlowConfiguration: Sendable, Equatable {
         copy.landmarkSmoothing = landmarkSmoothing.clamped(to: 0.01...1)
         copy.stillSmoothing = stillSmoothing.clamped(to: 0.01...1)
         copy.stillnessThreshold = stillnessThreshold.clamped(to: 0...4)
+        copy.velocitySmoothing = velocitySmoothing.clamped(to: 0.01...1)
         // Strictly above the stillness figure, or the ramp between them is a
         // step and the glow snaps between filters as the head starts to move.
         copy.motionThreshold = max(copy.stillnessThreshold + 0.01,
                                    motionThreshold.clamped(to: 0...8))
-        copy.predictionSeconds = predictionSeconds.clamped(to: 0...0.2)
         copy.minimumTrackingConfidence = minimumTrackingConfidence.clamped(to: 0...1)
 
         copy.minimumEyeOpenness = max(0, min(minimumEyeOpenness, 1))
@@ -274,29 +314,6 @@ struct EyeGlowConfiguration: Sendable, Equatable {
         return 1 - pow(1 - alpha, Float(clamped * 60))
     }
 
-    /// Never project further ahead than this, however stale the landmarks are.
-    ///
-    /// Vision stalling doesn't mean the head kept moving at the last measured
-    /// speed, and extrapolating a long way on that assumption throws the glow
-    /// off the face entirely — worse than the lag it is there to hide.
-    ///
-    /// It has to sit above a normal reading's age or it clips ordinary
-    /// operation rather than catching a stall. A twelfth of a second of
-    /// sampling plus the camera and inference behind it comes to about 0.12
-    /// on its own, so the previous figure was cutting into every frame the
-    /// moment the age started counting from capture. Still well under the half
-    /// second at which the landmarks are called stale outright.
-    static let maximumLeadSeconds = 0.2
-
-    /// How far ahead to draw, given how long ago the landmarks were measured.
-    ///
-    /// Vision runs at a twelfth of the frame rate, so its results describe
-    /// where the eyes were up to 80ms ago. Drawing them unchanged is most of
-    /// the lag: the glow is chasing a position the head has already left.
-    /// Advancing along the measured velocity by that same age cancels it.
-    func lead(forLandmarkAge age: Double) -> Float {
-        Float(min(max(age, 0), Self.maximumLeadSeconds)) + predictionSeconds
-    }
 }
 
 /// Geometry for one eye, in the same uv space every shader works in.
@@ -385,13 +402,6 @@ enum EyeGeometry {
         return length(v) > limit ? SIMD2(0, 0) : v
     }
 
-    /// Nudges the position along its velocity to cover tracking latency. Only
-    /// worth doing when the tracking is trustworthy, so the caller gates it.
-    static func predicted(_ center: SIMD2<Float>,
-                          velocity: SIMD2<Float>,
-                          seconds: Float) -> SIMD2<Float> {
-        center + velocity * seconds
-    }
 
     /// Backwards along the motion, scaled and capped — the streak trails the
     /// eye rather than leading it.

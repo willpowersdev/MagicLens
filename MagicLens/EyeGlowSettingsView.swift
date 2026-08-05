@@ -78,8 +78,6 @@ struct EyeGlowSettingsView: View {
             slider("Steadiness", value: $configuration.stillSmoothing, in: 0.01...1,
                    format: { String(format: "%.2f", $0) })
 
-            slider("Lead", value: $configuration.predictionSeconds, in: 0...0.2,
-                   format: { String(format: "%.0fms", $0 * 1000) })
             slider("Confidence", value: $configuration.minimumTrackingConfidence, in: 0...1)
             slider("Blink floor", value: $configuration.minimumEyeOpenness, in: 0...1)
             slider("Blink ceiling", value: $configuration.fullEyeOpenness, in: 0...1)

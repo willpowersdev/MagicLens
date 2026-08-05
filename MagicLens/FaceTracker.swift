@@ -111,9 +111,20 @@ final class FaceTracker {
     private static let fadeSeconds: Float = 0.25
 
     /// Landmarks are expensive enough that running them every frame would eat
-    /// the budget the effects need, and eyes don't move fast enough to warrant
-    /// it. Between runs the smoothing carries them.
-    private static let landmarkInterval = 1.0 / 12.0
+    /// the budget the effects need. Between runs the smoothing carries them.
+    ///
+    /// This was the largest single source of tracking lag: at a twelfth of a
+    /// second a reading was up to 83ms old before anything downstream saw it,
+    /// and no amount of prediction recovers detail that was never sampled. At
+    /// a fortieth it is 25ms, close enough to a frame that the prediction has
+    /// little left to cover.
+    ///
+    /// A ceiling rather than a schedule — one request runs at a time, so this
+    /// asks for a rate rather than promising one, and a frame that takes
+    /// longer defers the next instead of queueing behind itself. Whether the
+    /// hardware actually keeps up is a question for a device, not for this
+    /// constant.
+    static let landmarkInterval = 1.0 / 40.0
 
     /// Landmarks go stale faster than the box does — a head turn invalidates
     /// them while the face is still perfectly well tracked.
@@ -149,6 +160,10 @@ final class FaceTracker {
     /// detections rather than against the smoothed position.
     private var measuredLeftEye: SIMD2<Float>?
     private var measuredRightEye: SIMD2<Float>?
+
+    /// Velocity averaged across readings — see `velocitySmoothing`.
+    private var smoothedLeftVelocity = SIMD2<Float>(0, 0)
+    private var smoothedRightVelocity = SIMD2<Float>(0, 0)
     private var storedConfiguration = TeethHighlightConfiguration()
     private var storedEyeGlow = EyeGlowConfiguration()
     private var loggedMouth = false
@@ -222,45 +237,28 @@ final class FaceTracker {
             // head is.
             let follow = settings.follow(forElapsed: Double(elapsed), motion: motion)
 
-            // Landmarks describe where the eyes were when Vision ran, which at
-            // a twelfth of the frame rate is most of a tenth of a second ago.
-            // Chasing that position unchanged is the bulk of the lag, so the
-            // reading is carried forward along its own velocity first — the
-            // glow then chases where the eyes are rather than where they were.
+            // Drawn where the landmarks say, and nowhere else.
             //
-            // Scaled by motion, because projecting along a velocity that is
-            // only jitter walks the glow around a face that is sitting still.
-            let lead = settings.lead(forLandmarkAge: now - lastLandmarks) * motion
+            // Nothing here projects along the measured velocity any more. That
+            // covered the gap between a reading being taken and being drawn,
+            // but it is a guess about a head that may have already stopped, and
+            // a guess that is wrong overshoots and settles back. What remains
+            // is the honest position, a detection interval old.
+            tracked.leftEye += (eyeTarget.leftEye - tracked.leftEye) * follow
+            tracked.rightEye += (eyeTarget.rightEye - tracked.rightEye) * follow
 
-            let leftShift = eyeTarget.leftVelocity * lead
-            let rightShift = eyeTarget.rightVelocity * lead
-
-            let leftAhead = EyeGeometry.predicted(eyeTarget.leftEye,
-                                                  velocity: eyeTarget.leftVelocity,
-                                                  seconds: lead)
-            let rightAhead = EyeGeometry.predicted(eyeTarget.rightEye,
-                                                   velocity: eyeTarget.rightVelocity,
-                                                   seconds: lead)
-
-            tracked.leftEye += (leftAhead - tracked.leftEye) * follow
-            tracked.rightEye += (rightAhead - tracked.rightEye) * follow
-
-            // The pupils move with their own eye rather than being predicted
-            // separately — they sit inside it, and two independent estimates
-            // would let them drift out of it.
-            tracked.leftPupil += (eyeTarget.leftPupil + leftShift - tracked.leftPupil) * follow
-            tracked.rightPupil += (eyeTarget.rightPupil + rightShift - tracked.rightPupil) * follow
+            tracked.leftPupil += (eyeTarget.leftPupil - tracked.leftPupil) * follow
+            tracked.rightPupil += (eyeTarget.rightPupil - tracked.rightPupil) * follow
             tracked.eyePresence += (1 - tracked.eyePresence) * step
 
             // The contours themselves, on the same terms as the mouth below.
             // Without this the glow has nothing to draw: `tracked` is what the
             // renderer reads, and only the centres were ever carried across.
-            // Shifted with their own eye, so the shape stays around the centre.
             tracked.leftEyeShape = Self.follow(tracked.leftEyeShape,
-                                               towards: eyeTarget.leftEyeShape.map { $0 + leftShift },
+                                               towards: eyeTarget.leftEyeShape,
                                                rate: follow)
             tracked.rightEyeShape = Self.follow(tracked.rightEyeShape,
-                                                towards: eyeTarget.rightEyeShape.map { $0 + rightShift },
+                                                towards: eyeTarget.rightEyeShape,
                                                 rate: follow)
 
             tracked.leftOpenness += (eyeTarget.leftOpenness - tracked.leftOpenness) * follow
@@ -579,13 +577,28 @@ final class FaceTracker {
         if lastLandmarks > 0, sinceLast < Self.landmarkGraceSeconds,
            let previousLeft = measuredLeftEye, let previousRight = measuredRightEye {
 
-            found.leftVelocity = EyeGeometry.velocity(from: previousLeft,
-                                                      to: leftEye,
-                                                      elapsed: sinceLast)
-            found.rightVelocity = EyeGeometry.velocity(from: previousRight,
-                                                       to: rightEye,
-                                                       elapsed: sinceLast)
+            let left = EyeGeometry.velocity(from: previousLeft,
+                                            to: leftEye,
+                                            elapsed: sinceLast)
+            let right = EyeGeometry.velocity(from: previousRight,
+                                             to: rightEye,
+                                             elapsed: sinceLast)
+
+            // Averaged across readings rather than taken raw. A difference
+            // between two positions over a short interval multiplies the
+            // landmark noise instead of averaging it, and everything that reads
+            // this — how hard to filter, which way the trail smears — then acts
+            // on a number that is mostly wobble.
+            let blend = settings.velocitySmoothing
+            smoothedLeftVelocity += (left - smoothedLeftVelocity) * blend
+            smoothedRightVelocity += (right - smoothedRightVelocity) * blend
+        } else {
+            smoothedLeftVelocity = SIMD2(0, 0)
+            smoothedRightVelocity = SIMD2(0, 0)
         }
+
+        found.leftVelocity = smoothedLeftVelocity
+        found.rightVelocity = smoothedRightVelocity
 
         measuredLeftEye = leftEye
         measuredRightEye = rightEye

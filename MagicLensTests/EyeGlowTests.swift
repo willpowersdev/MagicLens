@@ -184,88 +184,70 @@ final class EyeGlowTests: XCTestCase {
         XCTAssertGreaterThan(clean.motion(forSpeed: 10), 0.9)
     }
 
-    // MARK: - When the measurement describes
+    // MARK: - Sampling rate
 
-    /// Dating a reading at the wrong instant is invisible: everything still
-    /// moves smoothly, it just never quite arrives. The prediction leads by the
-    /// landmarks' age, so an age measured from when Vision finished rather than
-    /// from when the frame was taken is short by the whole camera-and-inference
-    /// latency — and the glow trails by exactly the distance the head covered
-    /// in that time.
-    func testTheLeadCoversTheCameraAndInferenceLatency() {
+    /// Stillness is judged from a speed, and that speed is a distance divided
+    /// by the gap between readings — so the threshold belongs to the sampling
+    /// rate, not to heads.
+    ///
+    /// Halving the interval doubles the speed the same landmark wander implies.
+    /// Raising the detection rate without raising this makes a motionless face
+    /// read as a moving one, which turns the still filter off and brings back
+    /// the flicker it exists to prevent. This is what ties the two together.
+    func testStillnessSurvivesTheSamplingRate() {
         let configuration = EyeGlowConfiguration()
 
-        // A reading taken 1/12s ago, which took 40ms to come back.
-        let sampling = 1.0 / 12.0
-        let pipeline = 0.04
+        // What Vision's landmarks wander by from a completely still head, and
+        // what that becomes once the velocity has been averaged.
+        let wander: Float = 0.003
+        let raw = wander / Float(FaceTracker.landmarkInterval)
+        let implied = raw * configuration.velocityNoiseFactor
 
-        let fromCapture = configuration.lead(forLandmarkAge: sampling + pipeline)
-        let fromCompletion = configuration.lead(forLandmarkAge: sampling)
+        XCTAssertLessThan(implied, configuration.stillnessThreshold,
+                          "at this detection rate, jitter alone reads as movement")
 
-        XCTAssertGreaterThan(fromCapture, fromCompletion)
-        XCTAssertEqual(fromCapture - fromCompletion, Float(pipeline), accuracy: 1e-5,
-                       "the shortfall should be exactly the latency that was ignored")
+        // And a real movement still has to clear it comfortably.
+        let turning: Float = 0.8
+        XCTAssertGreaterThan(configuration.motion(forSpeed: turning), 0.9)
     }
 
-    /// At a plausible head speed, that shortfall is a visible distance rather
-    /// than a rounding error — which is the argument for bothering at all.
-    func testTheShortfallIsWorthCorrecting() {
+    /// The other half of it, and the half that actually went wrong.
+    ///
+    /// Chasing the noise floor upwards took the threshold past real movement:
+    /// at 0.18 an eye crossing its own width in a third of a second counted as
+    /// still, and was filtered at a fifth of a second's time constant. It has
+    /// to stay below anything a person would call moving, however noisy the
+    /// measurement gets — the noise is what must come down.
+    func testStillnessStaysBelowRealMovement() {
         let configuration = EyeGlowConfiguration()
 
-        let speed: Float = 0.8            // uv per second, a brisk head turn
-        let pipeline: Float = 0.04
+        // An eye is roughly 0.06 uv across. Crossing its own width in half a
+        // second is unmistakably movement, and nobody should see it damped.
+        let gentle: Float = 0.06 / 0.5
 
-        let missed = speed * pipeline
-
-        // An eye is roughly 0.06 uv across, so this is half an eye's width.
-        XCTAssertGreaterThan(missed, 0.03)
-        XCTAssertLessThan(missed, Float(EyeGlowConfiguration.maximumLeadSeconds) * speed,
-                          "and still inside what the cap allows to be corrected")
+        XCTAssertGreaterThan(configuration.motion(forSpeed: gentle), 0.25,
+                             "a visible movement is being treated as stillness")
+        XCTAssertLessThan(configuration.stillnessThreshold, gentle)
     }
 
-    // MARK: - Prediction
-
-    /// The lag being fixed: Vision runs at a twelfth of the frame rate, so its
-    /// answer is up to 80ms old by the time it is drawn. Cancelling that age
-    /// is most of what stops the glow chasing the eyes.
-    func testTheLeadCancelsTheAgeOfTheLandmarks() {
+    /// Averaging is only worth having if it actually quietens the reading.
+    func testAveragingTheVelocityReducesItsNoise() {
         let configuration = EyeGlowConfiguration()
 
-        let lead = configuration.lead(forLandmarkAge: 1.0 / 12.0)
+        XCTAssertLessThan(configuration.velocityNoiseFactor, 1)
+        XCTAssertGreaterThan(configuration.velocityNoiseFactor, 0)
 
-        XCTAssertEqual(lead,
-                       Float(1.0 / 12.0) + configuration.predictionSeconds,
-                       accuracy: 1e-5)
+        var quiet = EyeGlowConfiguration()
+        quiet.velocitySmoothing = 0.1
+        XCTAssertLessThan(quiet.velocityNoiseFactor, configuration.velocityNoiseFactor,
+                          "taking less of each reading should average harder")
+
+        var raw = EyeGlowConfiguration()
+        raw.velocitySmoothing = 1
+        XCTAssertEqual(raw.velocityNoiseFactor, 1, accuracy: 1e-6,
+                       "taking every reading whole is no averaging at all")
     }
 
-    /// Fresh landmarks still lead a little, for the part of the pipeline the
-    /// age can't see.
-    func testFreshLandmarksStillLeadSlightly() {
-        let configuration = EyeGlowConfiguration()
-
-        XCTAssertEqual(configuration.lead(forLandmarkAge: 0),
-                       configuration.predictionSeconds,
-                       accuracy: 1e-6)
-    }
-
-    /// Vision stalling doesn't mean the head kept moving. Extrapolating a long
-    /// way on that assumption throws the glow clean off the face, which is
-    /// worse than the lag.
-    func testTheLeadIsCappedWhenTrackingStalls() {
-        let configuration = EyeGlowConfiguration()
-
-        let stalled = configuration.lead(forLandmarkAge: 5)
-
-        XCTAssertEqual(stalled,
-                       Float(EyeGlowConfiguration.maximumLeadSeconds)
-                           + configuration.predictionSeconds,
-                       accuracy: 1e-5)
-    }
-
-    func testANegativeAgeDoesNotDragTheGlowBackwards() {
-        let configuration = EyeGlowConfiguration()
-        XCTAssertGreaterThanOrEqual(configuration.lead(forLandmarkAge: -1), 0)
-    }
 
     // MARK: - Geometry
 
@@ -387,13 +369,6 @@ final class EyeGlowTests: XCTestCase {
 
         XCTAssertFalse(v.x.isNaN)
         XCTAssertFalse(v.y.isNaN)
-    }
-
-    func testPredictionLeadsTheMotion() {
-        let ahead = EyeGeometry.predicted(SIMD2(0.5, 0.5),
-                                          velocity: SIMD2(1, 0),
-                                          seconds: 0.02)
-        XCTAssertEqual(ahead.x, 0.52, accuracy: 1e-6)
     }
 
     // MARK: - Trail direction
@@ -651,7 +626,6 @@ final class EyeGlowTests: XCTestCase {
     }
 
     // MARK: - GPU harness
-
 
     /// Renders one eye centred at `center` and returns where the brightest
     /// texel ended up, in the normalised coordinates the composite samples
