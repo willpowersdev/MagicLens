@@ -385,6 +385,45 @@ final class CameraFeed: NSObject {
 extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate,
                        AVCaptureAudioDataOutputSampleBufferDelegate {
 
+    /// When the frame was actually taken, on the same clock as the rest of the
+    /// app.
+    ///
+    /// A frame reaches this callback some time after the light hit the sensor,
+    /// and anything predicting where a face is going needs to know which of
+    /// those two instants its measurement describes. Timestamping at arrival
+    /// makes a moving head look like it was where it is now a moment ago, which
+    /// under-states how far it has travelled since.
+    ///
+    /// The sample's timestamp is on the capture clock rather than this one, so
+    /// the frame's age is measured against that clock and then subtracted from
+    /// the current time here. Measuring the age rather than storing an offset
+    /// once means nothing accumulates if the two clocks drift.
+    static func captureTime(of sampleBuffer: CMSampleBuffer,
+                            arrivingAt arrival: CFAbsoluteTime) -> CFAbsoluteTime {
+
+        let stamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+
+        guard stamp.isValid, !stamp.isIndefinite else {
+            return arrival
+        }
+
+        let hostNow = CMClockGetTime(CMClockGetHostTimeClock())
+
+        guard hostNow.isValid else {
+            return arrival
+        }
+
+        let age = hostNow.seconds - stamp.seconds
+
+        // A negative or implausible age means the two aren't the clocks assumed
+        // here, and arrival is a better guess than an arbitrary shift.
+        guard age.isFinite, age >= 0, age < 1 else {
+            return arrival
+        }
+
+        return arrival - age
+    }
+
     func captureOutput(_ captureOutput: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
 
         // Both outputs land here. Checking the type rather than comparing
@@ -444,6 +483,7 @@ extension CameraFeed : AVCaptureVideoDataOutputSampleBufferDelegate,
         faces.analyze(pixelBuffer,
                       bufferIsLandscape: landscape,
                       mirrored: mirrored,
+                      capturedAt: Self.captureTime(of: sampleBuffer, arrivingAt: now),
                       now: now)
 
         // Offered the same way, and throttled on its own clock. It crops to the

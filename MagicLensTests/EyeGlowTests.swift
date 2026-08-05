@@ -184,6 +184,45 @@ final class EyeGlowTests: XCTestCase {
         XCTAssertGreaterThan(clean.motion(forSpeed: 10), 0.9)
     }
 
+    // MARK: - When the measurement describes
+
+    /// Dating a reading at the wrong instant is invisible: everything still
+    /// moves smoothly, it just never quite arrives. The prediction leads by the
+    /// landmarks' age, so an age measured from when Vision finished rather than
+    /// from when the frame was taken is short by the whole camera-and-inference
+    /// latency — and the glow trails by exactly the distance the head covered
+    /// in that time.
+    func testTheLeadCoversTheCameraAndInferenceLatency() {
+        let configuration = EyeGlowConfiguration()
+
+        // A reading taken 1/12s ago, which took 40ms to come back.
+        let sampling = 1.0 / 12.0
+        let pipeline = 0.04
+
+        let fromCapture = configuration.lead(forLandmarkAge: sampling + pipeline)
+        let fromCompletion = configuration.lead(forLandmarkAge: sampling)
+
+        XCTAssertGreaterThan(fromCapture, fromCompletion)
+        XCTAssertEqual(fromCapture - fromCompletion, Float(pipeline), accuracy: 1e-5,
+                       "the shortfall should be exactly the latency that was ignored")
+    }
+
+    /// At a plausible head speed, that shortfall is a visible distance rather
+    /// than a rounding error — which is the argument for bothering at all.
+    func testTheShortfallIsWorthCorrecting() {
+        let configuration = EyeGlowConfiguration()
+
+        let speed: Float = 0.8            // uv per second, a brisk head turn
+        let pipeline: Float = 0.04
+
+        let missed = speed * pipeline
+
+        // An eye is roughly 0.06 uv across, so this is half an eye's width.
+        XCTAssertGreaterThan(missed, 0.03)
+        XCTAssertLessThan(missed, Float(EyeGlowConfiguration.maximumLeadSeconds) * speed,
+                          "and still inside what the cap allows to be corrected")
+    }
+
     // MARK: - Prediction
 
     /// The lag being fixed: Vision runs at a twelfth of the frame rate, so its

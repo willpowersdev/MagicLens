@@ -362,6 +362,7 @@ final class FaceTracker {
     func analyze(_ pixelBuffer: CVPixelBuffer,
                  bufferIsLandscape: Bool,
                  mirrored: Bool,
+                 capturedAt: CFAbsoluteTime,
                  now: CFAbsoluteTime) {
 
         lock.lock()
@@ -379,14 +380,16 @@ final class FaceTracker {
         visionQueue.async { [weak self] in
             self?.detectLandmarks(in: pixelBuffer,
                                   bufferIsLandscape: bufferIsLandscape,
-                                  mirrored: mirrored)
+                                  mirrored: mirrored,
+                                  capturedAt: capturedAt)
         }
     }
 
     /// Runs on `visionQueue`.
     private func detectLandmarks(in pixelBuffer: CVPixelBuffer,
                                  bufferIsLandscape: Bool,
-                                 mirrored: Bool) {
+                                 mirrored: Bool,
+                                 capturedAt: CFAbsoluteTime) {
 
         defer {
             lock.lock()
@@ -563,7 +566,16 @@ final class FaceTracker {
         // reports the smoother's own error rather than how fast the head is
         // moving — and prediction built on that reading chases its own tail.
         // Two raw readings and the interval between them is the honest figure.
-        let sinceLast = CFAbsoluteTimeGetCurrent() - lastLandmarks
+        //
+        // And the interval is measured between the two *frames*, not between
+        // the two times Vision happened to finish. The camera's own latency
+        // and the inference sit in between; dating a reading at the later
+        // instant says the eyes were there more recently than they were, so
+        // everything downstream starts its prediction too late and falls short
+        // by however far the head moved in the meantime. That reads as lag
+        // rather than as a mistake, which is why it survives being looked at.
+        let measuredAt = capturedAt
+        let sinceLast = measuredAt - lastLandmarks
         if lastLandmarks > 0, sinceLast < Self.landmarkGraceSeconds,
            let previousLeft = measuredLeftEye, let previousRight = measuredRightEye {
 
@@ -586,7 +598,9 @@ final class FaceTracker {
         }
 
         eyeTarget = found
-        lastLandmarks = CFAbsoluteTimeGetCurrent()
+        // From capture too, so staleness is the age of the picture rather than
+        // the age of this function call, and `lead` measures the real gap.
+        lastLandmarks = measuredAt
         lock.unlock()
     }
 

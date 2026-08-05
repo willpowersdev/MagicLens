@@ -279,7 +279,14 @@ struct EyeGlowConfiguration: Sendable, Equatable {
     /// Vision stalling doesn't mean the head kept moving at the last measured
     /// speed, and extrapolating a long way on that assumption throws the glow
     /// off the face entirely — worse than the lag it is there to hide.
-    static let maximumLeadSeconds = 0.12
+    ///
+    /// It has to sit above a normal reading's age or it clips ordinary
+    /// operation rather than catching a stall. A twelfth of a second of
+    /// sampling plus the camera and inference behind it comes to about 0.12
+    /// on its own, so the previous figure was cutting into every frame the
+    /// moment the age started counting from capture. Still well under the half
+    /// second at which the landmarks are called stale outright.
+    static let maximumLeadSeconds = 0.2
 
     /// How far ahead to draw, given how long ago the landmarks were measured.
     ///
